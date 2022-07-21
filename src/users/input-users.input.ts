@@ -16,6 +16,8 @@ export class UserInput {
     @Field(() => String, { description: 'Public key of the user' })
     @IsString()
     readonly publicKey: string;
+    @Field(() => Number, { description: 'access of the user : bin rwrw' })
+    readonly credidential: number;
 }
 
 @InputType()

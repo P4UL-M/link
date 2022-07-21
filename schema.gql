@@ -16,9 +16,13 @@ type User {
 
   """Public key of the user"""
   publicKey: String!
+
+  """access of the user : bin rwrw"""
+  credidential: Float!
 }
 
 type Query {
+  User(id: String!): User
   whoami: User
 }
 
@@ -38,4 +42,7 @@ input UserInput {
 
   """Public key of the user"""
   publicKey: String!
+
+  """access of the user : bin rwrw"""
+  credidential: Float!
 }

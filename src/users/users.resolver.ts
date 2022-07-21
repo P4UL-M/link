@@ -1,12 +1,11 @@
 import { Resolver, Query, Mutation, Args } from '@nestjs/graphql';
 import { UsersService } from './users.service';
-import { UserType } from './dto/create-user.dto';
 import { UserInput, UpdateUserInput, FilterUserInput } from './input-users.input';
 import { User } from './interfaces/user.entity';
 import { GqlAuthGuard, CurrentUser } from '../auth/graphql-auth.guard';
 import { UseGuards } from '@nestjs/common';
 
-@Resolver((of) => UserType)
+@Resolver((of) => User)
 export class UsersResolver {
     constructor(private readonly usersService: UsersService) {}
     /*
@@ -15,12 +14,12 @@ export class UsersResolver {
     async Users(): Promise<UserType[]> {
         return this.usersService.findAll();
     }
-
+    */
     @UseGuards(GqlAuthGuard)
-    @Query((returns) => UserType, { nullable: true })
-    async User(@Args('id') id: string): Promise<UserType> {
+    @Query((returns) => User, { nullable: true })
+    async User(@Args('id') id: string): Promise<User> {
         return this.usersService.findOne(id);
-    }*/
+    }
 
     @UseGuards(GqlAuthGuard)
     @Query((returns) => User, { nullable: true })

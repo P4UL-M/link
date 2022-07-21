@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { UserType } from './dto/create-user.dto';
 import { UserInput, UpdateUserInput, FilterUserInput } from './input-users.input';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -22,7 +21,7 @@ export class UsersService {
         return await this.userRepository.find().exec();
     }*/
 
-    async findOne(id: string, email = false): Promise<UserType> {
+    async findOne(id: string, email = false): Promise<User> {
         if (email) {
             return await this.userRepository.findOne({ where: { email: id } });
         }

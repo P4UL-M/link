@@ -1,11 +1,12 @@
 import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
 import { ObjectType, Field, ID } from '@nestjs/graphql';
 import { IsEmail, IsString, IsNotEmpty, IsDate, IsOptional } from 'class-validator';
+import { loggerMiddleware } from '../../auth/auth.middleware';
 
 @Entity('users')
 @ObjectType()
 export class User {
-    @Field(() => ID)
+    @Field(() => ID, { middleware: [loggerMiddleware] })
     @IsString()
     @IsNotEmpty()
     @PrimaryGeneratedColumn('uuid')
@@ -23,7 +24,7 @@ export class User {
     @Column()
     email: string;
 
-    @Field(() => String, { description: 'Password of the user' })
+    @Field(() => String, { description: 'Password of the user', middleware: [loggerMiddleware] })
     @IsString()
     @IsNotEmpty()
     @Column()
@@ -34,4 +35,12 @@ export class User {
     @IsNotEmpty()
     @Column()
     publicKey: string;
+
+    @Field(() => Number, {
+        description: 'access of the user : bin rwrw',
+        middleware: [loggerMiddleware],
+    })
+    @IsNotEmpty()
+    @Column()
+    credidential: number;
 }
