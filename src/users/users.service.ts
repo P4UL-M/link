@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { UserInput, UpdateUserInput, FilterUserInput } from './input-users.input';
+import { FilterUserInput } from './input-users.input';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './interfaces/user.entity';
+import { UnauthorizedException } from '@nestjs/common';
 
 @Injectable()
 export class UsersService {
@@ -10,27 +11,47 @@ export class UsersService {
         @InjectRepository(User)
         private userRepository: Repository<User>
     ) {}
+
     async create(createUserDto: User): Promise<User> {
         const createdUser = this.userRepository.create(createUserDto);
         await this.userRepository.insert(createdUser);
         return createdUser;
     }
 
-    /*
-    async findAll(): Promise<UserType[]> {
-        return await this.userRepository.find().exec();
-    }*/
-
-    async findOne(id: string, email = false): Promise<User> {
-        if (email) {
-            return await this.userRepository.findOne({ where: { email: id } });
+    async newUser(createUserDto: any): Promise<User> {
+        // check here if email isn't already used
+        if (await this.userRepository.findOne({ where: { email: createUserDto.email } })) {
+            throw new UnauthorizedException('Email already used');
         }
-        return await this.userRepository.findOne({ where: { _id: id } });
+        createUserDto.credidential = 1;
+        // generate a 4-char random unique code
+        createUserDto.publicKey = Math.random()
+            .toString(36)
+            .toUpperCase()
+            .substr(2, 5)
+            .padStart(5, '0');
+        const createdUser = this.userRepository.create(createUserDto as User);
+        await this.userRepository.insert(createdUser);
+        return createdUser;
+    }
+
+    async findOne(input: any, type = 'id'): Promise<User> {
+        if (type == 'email') {
+            return await this.userRepository.findOne({ where: { email: input } });
+        }
+        if (type == 'input') {
+            return await this.userRepository.findOne({
+                where: { pseudo: input.pseudo, publicKey: input.publicKey },
+            });
+        }
+        return await this.userRepository.findOne({ where: { _id: input } });
+    }
+    async findAll(filter: FilterUserInput): Promise<User[]> {
+        return await this.userRepository.find({
+            where: filter || {}, //TODO correct filter format here
+        });
     }
     /*
-    async findByCriteria(filter: FilterUserInput): Promise<UserType[]> {
-        return await this.userRepository.find(filter).exec();
-    }
 
     async delete(id: string): Promise<UserType> {
         return await this.userRepository.findByIdAndRemove(id);

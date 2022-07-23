@@ -1,6 +1,6 @@
 import { Resolver, Query, Mutation, Args } from '@nestjs/graphql';
 import { UsersService } from './users.service';
-import { UserInput, UpdateUserInput, FilterUserInput } from './input-users.input';
+import { UserInput, NewUserInput, FilterUserInput, SearchUserInput } from './input-users.input';
 import { User } from './interfaces/user.entity';
 import { GqlAuthGuard, CurrentUser } from '../auth/graphql-auth.guard';
 import { UseGuards } from '@nestjs/common';
@@ -8,17 +8,25 @@ import { UseGuards } from '@nestjs/common';
 @Resolver((of) => User)
 export class UsersResolver {
     constructor(private readonly usersService: UsersService) {}
-    /*
-    @UseGuards(GqlAuthGuard)
-    @Query((returns) => [UserType])
-    async Users(): Promise<UserType[]> {
-        return this.usersService.findAll();
-    }
-    */
+
     @UseGuards(GqlAuthGuard)
     @Query((returns) => User, { nullable: true })
-    async User(@Args('id') id: string): Promise<User> {
-        return this.usersService.findOne(id);
+    async User(
+        @Args('id', { type: () => String, nullable: true }) id: string,
+        @Args('email', { type: () => String, nullable: true }) email: string,
+        @Args('input', { type: () => SearchUserInput, nullable: true })
+        input: any
+    ): Promise<User> {
+        if (id) {
+            return this.usersService.findOne(id);
+        }
+        if (email) {
+            return this.usersService.findOne(email, 'email');
+        }
+        if (input) {
+            return this.usersService.findOne(input, 'input');
+        }
+        return null;
     }
 
     @UseGuards(GqlAuthGuard)
@@ -26,17 +34,27 @@ export class UsersResolver {
     async whoami(@CurrentUser() user: User): Promise<User> {
         return this.usersService.findOne(user._id);
     }
-    /*
-    @UseGuards(GqlAuthGuard)
-    @Query((returns) => [UserType])
-    async UserByCriteria(@Args('filter') filter: FilterUserInput): Promise<UserType[]> {
-        return this.usersService.findByCriteria(filter);
-    }
-    */
 
+    @Query((returns) => Boolean)
+    async exist(@Args('email', { type: () => String }) _email: string): Promise<boolean> {
+        return (await this.usersService.findOne(_email, 'email')) != null;
+    }
+
+    @UseGuards(GqlAuthGuard)
+    @Query((returns) => [User])
+    async Users(@Args('filter', { nullable: true }) filter: FilterUserInput): Promise<User[]> {
+        return this.usersService.findAll(filter);
+    }
+
+    @UseGuards(GqlAuthGuard)
     @Mutation((returns) => User)
     async createUser(@Args('input') input: UserInput): Promise<User> {
         return this.usersService.create(input);
+    }
+
+    @Mutation((returns) => User)
+    async newUser(@Args('input') input: NewUserInput): Promise<User> {
+        return this.usersService.newUser(input);
     }
     /*
     @UseGuards(GqlAuthGuard)
