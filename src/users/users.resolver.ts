@@ -49,7 +49,7 @@ export class UsersResolver {
     @UseGuards(GqlAuthGuard)
     @Mutation((returns) => User)
     async createUser(@Args('input') input: UserInput): Promise<User> {
-        return this.usersService.create(input);
+        return this.usersService.create(input as User);
     }
 
     @Mutation((returns) => User)

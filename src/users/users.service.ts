@@ -56,8 +56,9 @@ export class UsersService {
     async delete(id: string): Promise<UserType> {
         return await this.userRepository.findByIdAndRemove(id);
     }
-
-    async update(id: string, user: User): Promise<UserType> {
-        return await this.userRepository.findByIdAndUpdate(id, user as User, { new: true });
-    }*/
+    */
+    async update(id: string, input: any): Promise<User> {
+        await this.userRepository.update(id, input);
+        return this.userRepository.findOne(id);
+    }
 }
