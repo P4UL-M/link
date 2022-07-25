@@ -1,17 +1,15 @@
-import * as Keychain from "react-native-keychain";
+import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 
 async function storeAuth(accessToken, refreshToken) {
-    if (Platform.OS === "native") {
-        await Keychain.setGenericPassword(
-            "token",
-            JSON.stringify({
-                accessToken,
-                refreshToken,
-            })
-        );
+    if (Platform.OS === "ios" || Platform.OS === "android") {
+        const data = JSON.stringify({
+            accessToken,
+            refreshToken,
+        });
+        await SecureStore.setItemAsync("token", data);
     } else {
-        sessionStorage.setItem(
+        await sessionStorage.setItem(
             "token",
             JSON.stringify({
                 accessToken,
@@ -22,10 +20,11 @@ async function storeAuth(accessToken, refreshToken) {
 }
 
 async function getAuth() {
-    if (Platform.OS === "native") {
-        const token = await Keychain.getGenericPassword();
+    if (Platform.OS === "ios" || Platform.OS === "android") {
+        const token = await SecureStore.getItemAsync("token");
         if (token) {
-            return JSON.parse(token);
+            const data = JSON.parse(token);
+            return data;
         }
     } else {
         const token = sessionStorage.getItem("token");

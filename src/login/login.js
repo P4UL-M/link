@@ -14,16 +14,16 @@ import tw from '../../lib/tailwind'; // or, if no custom config: `from 'twrnc'`
 import { useDeviceContext } from 'twrnc';
 import { useNavigation } from '@react-navigation/native';
 import { useIsFocused } from '@react-navigation/native';
-import {AuthContext} from '../context/AuthContext';
-import {AxiosContext} from '../context/AxiosContext';
-import { storeAuth } from '../store/authStore';
+import { AuthContext } from '../context/AuthContext';
+import { AxiosContext } from '../context/AxiosContext';
+import { storeAuth, getAuth } from '../store/authStore';
 
 export default function LoginScreen() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [exists, setExists] = useState(false);
     const authContext = useContext(AuthContext);
-    const {publicAxios} = useContext(AxiosContext);
+    const { publicAxios } = useContext(AxiosContext);
 
     useDeviceContext(tw)
     const nav = useNavigation();
@@ -34,13 +34,34 @@ export default function LoginScreen() {
 
     // force reload on focus of screen
     useEffect(() => {
-        // clear on load
-        console.log('login screen focused');
-        emailInput.current.clear();
-        passwordInput.current.clear();
-        setEmail('');
-        setPassword('');
-        setExists(false);
+        if (isFocused) {
+            // clear on load
+            emailInput.current.clear();
+            passwordInput.current.clear();
+            setEmail('');
+            setPassword('');
+            setExists(false);
+            getAuth().then(async (auth) => {
+                if (auth) {
+                    publicAxios.get('/auth/refresh', {
+                        headers: {
+                            refresh_token: auth.refreshToken,
+                        }
+                    }).then(async (res) => {
+                        if (res.status === 200) {
+                            await storeAuth(res.data.access_token, res.data.refresh_token);
+
+                            await authContext.setAuthState({
+                                accessToken: res.data.access_token,
+                                refreshToken: res.data.refresh_token,
+                                authenticated: true}
+                            );
+                            nav.navigate('Home');
+                        }
+                    });
+                }
+            });
+        }
     } , [isFocused])
 
     async function isRegister() {
@@ -84,7 +105,7 @@ export default function LoginScreen() {
     }
 
     async function login() {
-
+        console.log('login');
         try {
             const response = await publicAxios.post('/auth/login', {
                 email,
@@ -98,10 +119,10 @@ export default function LoginScreen() {
                 refreshToken: refresh_token,
                 authenticated: true}
             );
-
-            storeAuth(access_token, refresh_token);
-      
-            nav.navigate('InputBar');
+            
+            await storeAuth(access_token, refresh_token);
+            
+            nav.navigate('Home');
             passwordInput.current.style = styles.textInput;
         } catch (error) {
             passwordInput.current.style.borderColor = "red";

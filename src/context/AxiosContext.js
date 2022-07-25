@@ -42,8 +42,6 @@ const AxiosProvider = ({ children }) => {
 
         return axios(options)
             .then(async (tokenRefreshResponse) => {
-                console.log("tokenRefreshResponse", tokenRefreshResponse);
-
                 failedRequest.response.config.headers.Authorization =
                     "Bearer " + tokenRefreshResponse.data.access_token;
 
@@ -53,8 +51,6 @@ const AxiosProvider = ({ children }) => {
                     refreshToken: tokenRefreshResponse.data.refresh_token,
                 });
 
-                console.log(tokenRefreshResponse.data.refresh_token);
-
                 storeAuth(
                     tokenRefreshResponse.data.access_token,
                     tokenRefreshResponse.data.refresh_token
@@ -63,6 +59,7 @@ const AxiosProvider = ({ children }) => {
                 return Promise.resolve();
             })
             .catch((e) => {
+                console.log("Error refreshing token", e);
                 authContext.setAuthState({
                     accessToken: null,
                     refreshToken: null,

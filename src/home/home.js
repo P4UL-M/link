@@ -11,8 +11,6 @@ import {
 import { Button } from "react-native-elements";
 import tw from "../../lib/tailwind"; // or, if no custom config: `from 'twrnc'`
 import { useDeviceContext } from "twrnc";
-import { useNavigation } from "@react-navigation/native";
-import { useIsFocused } from "@react-navigation/native";
 import { AuthContext } from "../context/AuthContext";
 import { AxiosContext } from "../context/AxiosContext";
 
@@ -21,11 +19,9 @@ const Home = () => {
     const { authAxios, publicAxios } = useContext(AxiosContext);
 
     useDeviceContext(tw);
-    const nav = useNavigation();
-    const isFocused = useIsFocused();
 
-    function getUser() {
-        const response = authAxios.post("graphql", {
+    async function getUser() {
+        const response = await authAxios.post("graphql", {
             query: `
                 query {
                     whoami {
@@ -37,15 +33,13 @@ const Home = () => {
                 }
             `,
         });
-
         console.log(response);
     }
 
-    function refresh() {
-        const response = publicAxios.get("auth/refresh", {
+    async function refresh() {
+        const response = await publicAxios.get("auth/refresh", {
             headers: { refresh_token: authContext.authState.refreshToken },
         });
-
         console.log(response);
     }
 
