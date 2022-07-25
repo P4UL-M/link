@@ -20,8 +20,7 @@ const AuthProvider = ({ children }) => {
     };
 
     const getAccessToken = () => {
-        console.log("getAccessToken", authState.accessToken);
-        return authState;
+        return authState.accessToken;
     };
 
     return (

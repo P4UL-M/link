@@ -1,5 +1,5 @@
 import { StyleSheet, View, Text } from "react-native";
-import InputBar from "./Inputbar";
+import Home from "./src/home/home";
 import LoginScreen from "./src/login/login";
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -16,7 +16,7 @@ export default function App() {
                 <NavigationContainer>
                     <Stack.Navigator initialRouteName="Login">
                         <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: true }} />
-                        <Stack.Screen name="InputBar" component={InputBar} options={{ headerShown: true }} />
+                        <Stack.Screen name="InputBar" component={Home} options={{ headerShown: true }} />
                     </Stack.Navigator>
                 </NavigationContainer>
             </AxiosProvider>

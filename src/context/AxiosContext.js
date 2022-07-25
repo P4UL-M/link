@@ -2,7 +2,7 @@ import React, { createContext, useContext } from "react";
 import axios from "axios";
 import { AuthContext } from "./AuthContext";
 import createAuthRefreshInterceptor from "axios-auth-refresh";
-import * as Keychain from "react-native-keychain";
+import { storeAuth } from "../store/authStore";
 
 const AxiosContext = createContext(null);
 const { Provider } = AxiosContext;
@@ -11,11 +11,11 @@ const AxiosProvider = ({ children }) => {
     const authContext = useContext(AuthContext);
 
     const authAxios = axios.create({
-        baseURL: "http://localhost:3000/auth",
+        baseURL: "http://localhost:3000/",
     });
 
     const publicAxios = axios.create({
-        baseURL: "http://localhost:3000/auth",
+        baseURL: "http://localhost:3000/",
     });
 
     authAxios.interceptors.request.use(
@@ -32,32 +32,32 @@ const AxiosProvider = ({ children }) => {
     );
 
     const refreshAuthLogic = (failedRequest) => {
-        const data = {
-            refreshToken: authContext.authState.refreshToken,
-        };
-
         const options = {
-            method: "POST",
-            data,
-            url: "http://localhost:3001/auth/refreshToken",
+            method: "GET",
+            url: "http://localhost:3000/auth/refresh",
+            headers: {
+                refresh_token: authContext.authState.refreshToken,
+            },
         };
 
         return axios(options)
             .then(async (tokenRefreshResponse) => {
+                console.log("tokenRefreshResponse", tokenRefreshResponse);
+
                 failedRequest.response.config.headers.Authorization =
-                    "Bearer " + tokenRefreshResponse.data.accessToken;
+                    "Bearer " + tokenRefreshResponse.data.access_token;
 
                 authContext.setAuthState({
                     ...authContext.authState,
-                    accessToken: tokenRefreshResponse.data.accessToken,
+                    accessToken: tokenRefreshResponse.data.access_token,
+                    refreshToken: tokenRefreshResponse.data.refresh_token,
                 });
 
-                await Keychain.setGenericPassword(
-                    "token",
-                    JSON.stringify({
-                        accessToken: tokenRefreshResponse.data.accessToken,
-                        refreshToken: authContext.authState.refreshToken,
-                    })
+                console.log(tokenRefreshResponse.data.refresh_token);
+
+                storeAuth(
+                    tokenRefreshResponse.data.access_token,
+                    tokenRefreshResponse.data.refresh_token
                 );
 
                 return Promise.resolve();

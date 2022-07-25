@@ -84,61 +84,22 @@ export default function LoginScreen() {
     }
 
     async function login() {
-        const logRequest = async () => {
-            try {
-                console.log(JSON.stringify({
-                    email: email,
-                    password: password,
-                }))
-                const body = JSON.stringify({
-                    email: email,
-                    password: password,
-                });
-                const response = await fetch(
-                    'http://localhost:3000/auth/login', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: body,
-                    }
-                );
-                const json = await response.json();
-                if (json.access_token) {
-                    await SecureStore.setItemAsync('secure_token',json.access_token);
-                    return true;
-                }
-            } catch (error) {
-                console.error(error);
-            }
-        };
-        if (await logRequest()) {
-            // test log with email and password here
-            nav.navigate('InputBar');
-            passwordInput.current.style = styles.textInput;
-        }
-        else {
-            passwordInput.current.style.borderColor = "red";
-        }
-    }
-
-    async function loginAxios() {
 
         try {
-            const response = await publicAxios.post('/login', {
+            const response = await publicAxios.post('/auth/login', {
                 email,
                 password,
             });
 
-            const {access_token} = response.data;
+            const {access_token, refresh_token} = response.data;
 
             await authContext.setAuthState({
                 accessToken: access_token,
-                refreshToken: '4',
+                refreshToken: refresh_token,
                 authenticated: true}
             );
 
-            storeAuth(access_token, '4');
+            storeAuth(access_token, refresh_token);
       
             nav.navigate('InputBar');
             passwordInput.current.style = styles.textInput;
@@ -173,13 +134,13 @@ export default function LoginScreen() {
                             style={[styles.textInput, {display: exists ? 'inherit' : 'none'}]}
                             secureTextEntry={true}
                             autoFocus={true}
-                            onSubmitEditing={() => loginAxios()}
+                            onSubmitEditing={() => login()}
                             onChangeText={(text) => setPassword(text)}
                         /> 
                         
                     </View>
                     <View style={styles.btnContainer}>
-                        <Button title="Submit" onPress={() => exists ? loginAxios() : isRegister()} />
+                        <Button title="Submit" onPress={() => exists ? login() : isRegister()} />
                     </View>
                 </View>
             </TouchableWithoutFeedback>
