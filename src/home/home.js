@@ -1,5 +1,5 @@
 import React, { useContext } from "react";
-import styles from "../login/style";
+import styles from "./style";
 import {
     Keyboard,
     KeyboardAvoidingView,
@@ -13,10 +13,13 @@ import tw from "../../lib/tailwind"; // or, if no custom config: `from 'twrnc'`
 import { useDeviceContext } from "twrnc";
 import { AuthContext } from "../context/AuthContext";
 import { AxiosContext } from "../context/AxiosContext";
+import { logout } from "../services/auth.service";
+import { useNavigation } from "@react-navigation/native";
 
 const Home = () => {
     const authContext = useContext(AuthContext);
-    const { authAxios, publicAxios } = useContext(AxiosContext);
+    const { authAxios } = useContext(AxiosContext);
+    const nav = useNavigation();
 
     useDeviceContext(tw);
 
@@ -32,13 +35,6 @@ const Home = () => {
                     }
                 }
             `,
-        });
-        console.log(response);
-    }
-
-    async function refresh() {
-        const response = await publicAxios.get("auth/refresh", {
-            headers: { refresh_token: authContext.authState.refreshToken },
         });
         console.log(response);
     }
@@ -60,7 +56,13 @@ const Home = () => {
                         <Button title="Submit" onPress={getUser} />
                     </View>
                     <View style={styles.btnContainer}>
-                        <Button title="Submit" onPress={refresh} />
+                        <Button
+                            title="Logout"
+                            onPress={() => {
+                                logout(authContext);
+                                nav.navigate("Login");
+                            }}
+                        />
                     </View>
                 </View>
             </TouchableWithoutFeedback>

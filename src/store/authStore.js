@@ -1,37 +1,31 @@
-import * as SecureStore from "expo-secure-store";
-import { Platform } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 async function storeAuth(accessToken, refreshToken) {
-    if (Platform.OS === "ios" || Platform.OS === "android") {
-        const data = JSON.stringify({
-            accessToken,
-            refreshToken,
-        });
-        await SecureStore.setItemAsync("token", data);
-    } else {
-        await sessionStorage.setItem(
-            "token",
-            JSON.stringify({
-                accessToken,
-                refreshToken,
-            })
-        );
+    try {
+        const data = JSON.stringify({ accessToken, refreshToken });
+        await AsyncStorage.setItem("auth", data);
+    } catch (error) {
+        console.log(error);
     }
 }
 
 async function getAuth() {
-    if (Platform.OS === "ios" || Platform.OS === "android") {
-        const token = await SecureStore.getItemAsync("token");
-        if (token) {
-            const data = JSON.parse(token);
-            return data;
+    try {
+        const data = await AsyncStorage.getItem("auth");
+        if (data) {
+            return JSON.parse(data);
         }
-    } else {
-        const token = sessionStorage.getItem("token");
-        if (token) {
-            return JSON.parse(token);
-        }
+    } catch (error) {
+        console.log(error);
     }
 }
 
-export { storeAuth, getAuth };
+async function removeAuth() {
+    try {
+        await AsyncStorage.removeItem("auth");
+    } catch (err) {
+        console.log(err);
+    }
+}
+
+export { storeAuth, getAuth, removeAuth };
