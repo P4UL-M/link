@@ -16,7 +16,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useIsFocused } from '@react-navigation/native';
 import { AuthContext } from '../context/AuthContext';
 import { AxiosContext } from '../context/AxiosContext';
-import { storeAuth, getAuth } from '../store/authStore';
+import { login, refresh } from '../services/auth.service';
 
 export default function LoginScreen() {
     const [email, setEmail] = useState('');
@@ -31,6 +31,7 @@ export default function LoginScreen() {
 
     let emailInput = useRef(null);
     let passwordInput = useRef(null);
+    let accountBtn = useRef(null);
 
     // force reload on focus of screen
     useEffect(() => {
@@ -41,24 +42,9 @@ export default function LoginScreen() {
             setEmail('');
             setPassword('');
             setExists(false);
-            getAuth().then(async (auth) => {
-                if (auth) {
-                    publicAxios.get('/auth/refresh', {
-                        headers: {
-                            refresh_token: auth.refreshToken,
-                        }
-                    }).then(async (res) => {
-                        if (res.status === 200) {
-                            await storeAuth(res.data.access_token, res.data.refresh_token);
-
-                            await authContext.setAuthState({
-                                accessToken: res.data.access_token,
-                                refreshToken: res.data.refresh_token,
-                                authenticated: true}
-                            );
-                            nav.navigate('Home');
-                        }
-                    });
+            refresh(publicAxios, authContext).then( (state) => {
+                if (state) {
+                    nav.navigate('Home');
                 }
             });
         }
@@ -97,14 +83,16 @@ export default function LoginScreen() {
             setExists(true);
             emailInput.current.style = styles.textInput;
             passwordInput.current.focus();
+            accountBtn.current.style.display = "none";
         }
         else {
             setExists(false);
             emailInput.current.style.borderColor = "red";
+            accountBtn.current.style.display = "inherit";
         }
     }
 
-    async function login() {
+    async function loginReq() {
         console.log('login');
         try {
             const response = await publicAxios.post('/auth/login', {
@@ -114,13 +102,7 @@ export default function LoginScreen() {
 
             const {access_token, refresh_token} = response.data;
 
-            await authContext.setAuthState({
-                accessToken: access_token,
-                refreshToken: refresh_token,
-                authenticated: true}
-            );
-            
-            await storeAuth(access_token, refresh_token);
+            await login(authContext, access_token, refresh_token);
             
             nav.navigate('Home');
             passwordInput.current.style = styles.textInput;
@@ -138,16 +120,21 @@ export default function LoginScreen() {
             <TouchableWithoutFeedback onPress={Platform.select(
                 {native: (Keyboard.dismiss),
                     web: (() => null)})}>
-                <View style={[styles.inner, tw` bg-white dark:bg-gray-700`]}>
-                    <Text style={styles.header}>Header</Text>
+                <View style={styles.inner}>
+                    <Text style={styles.header}>Link</Text>
                     <View>
                         <TextInput 
                             placeholder="email" 
-                            style={styles.textInput} 
+                            style={styles.textInput}
                             onSubmitEditing={() => isRegister()} 
                             onChangeText={(text) => setEmail(text)} 
                             ref={emailInput} 
                         />
+                        <TouchableWithoutFeedback onPress={() => nav.navigate("Register", {email:email})} style={styles.textBtn} ref={accountBtn}>
+                            <Text style={styles.textBtn_text}>
+                                Create Account ?
+                            </Text>
+                        </TouchableWithoutFeedback>
                         <TextInput
                             ref={passwordInput}
                             placeholder="Password"
@@ -155,13 +142,12 @@ export default function LoginScreen() {
                             style={[styles.textInput, {display: exists ? 'inherit' : 'none'}]}
                             secureTextEntry={true}
                             autoFocus={true}
-                            onSubmitEditing={() => login()}
+                            onSubmitEditing={() => loginReq()}
                             onChangeText={(text) => setPassword(text)}
-                        /> 
-                        
+                        />
                     </View>
                     <View style={styles.btnContainer}>
-                        <Button title="Submit" onPress={() => exists ? login() : isRegister()} />
+                        <Button buttonStyle={styles.btn} disabled={exists ? password=="" : email==""} title={exists ? "Sign in" : "Next"} onPress={() => exists ? login() : isRegister()}/>
                     </View>
                 </View>
             </TouchableWithoutFeedback>
