@@ -1,6 +1,6 @@
 import { InputType, Field } from '@nestjs/graphql';
 import { FilterableField } from '@nestjs-query/query-graphql';
-import { IsEmail, IsString, IsDate, IsOptional } from 'class-validator';
+import { IsEmail, IsString } from 'class-validator';
 
 @InputType()
 export class UserInput {

@@ -1,17 +1,18 @@
 import { Injectable } from '@nestjs/common';
-import { FilterUserInput } from './user.input';
+import { MessageInput } from './message.input';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { User } from './interfaces/user.entity';
+import { Message } from './interfaces/message.entity';
 import { UnauthorizedException } from '@nestjs/common';
 
 @Injectable()
-export class UsersService {
+export class MessagesService {
     constructor(
-        @InjectRepository(User)
-        private userRepository: Repository<User>
+        @InjectRepository(Message)
+        private messageRepository: Repository<Message>
     ) {}
 
+    /*
     async create(createUserDto: User): Promise<User> {
         const createdUser = this.userRepository.create(createUserDto);
         await this.userRepository.insert(createdUser);
@@ -57,8 +58,9 @@ export class UsersService {
         return await this.userRepository.findByIdAndRemove(id);
     }
     */
+    /*
     async update(id: string, input: any): Promise<User> {
         await this.userRepository.update(id, input);
         return this.userRepository.findOne(id);
-    }
+    }*/
 }
