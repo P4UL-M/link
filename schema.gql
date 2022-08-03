@@ -21,11 +21,26 @@ type User {
   credidential: Float!
 }
 
+type Message {
+  _id: ID!
+
+  """sender of the message"""
+  sender: User!
+
+  """Content of the message"""
+  content: String!
+
+  """Date of the message"""
+  date: String!
+}
+
 type Query {
   User(id: String, email: String, input: SearchUserInput): User
   whoami: User
   exist(email: String!): Boolean!
   Users(filter: FilterUserInput): [User!]!
+  Message(id: String!): Message
+  Messages(filter: FilterMessageInput): [Message!]!
 }
 
 input SearchUserInput {
@@ -53,9 +68,32 @@ input FilterUserInput {
   credidential: [Float!]
 }
 
+input FilterMessageInput {
+  """id of the message"""
+  _id: [ID!]
+
+  """sender of the message"""
+  sender: [ID!]
+
+  """Content of the message"""
+  content: [String!]
+
+  """Date of the message"""
+  date: [DateTime!]
+}
+
+"""
+A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
+"""
+scalar DateTime
+
 type Mutation {
   createUser(input: UserInput!): User!
   newUser(input: NewUserInput!): User!
+  createMessage(input: MessageInput!): Message!
+  newMessage(content: String!): Message!
+  deleteMessage(id: String!): Message
+  updateMessage(id: String!, content: String!): Message
 }
 
 input UserInput {
@@ -84,4 +122,12 @@ input NewUserInput {
 
   """Password of the user"""
   password: String!
+}
+
+input MessageInput {
+  """sender of the message"""
+  sender: ID!
+
+  """Content of the message"""
+  content: String!
 }

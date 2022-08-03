@@ -1,66 +1,58 @@
 import { Injectable } from '@nestjs/common';
-import { MessageInput } from './message.input';
+import { MessageInput, FilterMessageInput } from './message.input';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Message } from './interfaces/message.entity';
-import { UnauthorizedException } from '@nestjs/common';
+import { UsersService } from '../users/users.service';
+import { User } from '../users/interfaces/user.entity';
 
 @Injectable()
 export class MessagesService {
     constructor(
         @InjectRepository(Message)
-        private messageRepository: Repository<Message>
+        private messagesRepository: Repository<Message>,
+        private usersService: UsersService
     ) {}
 
-    /*
-    async create(createUserDto: User): Promise<User> {
-        const createdUser = this.userRepository.create(createUserDto);
-        await this.userRepository.insert(createdUser);
-        return createdUser;
+    async create(input: MessageInput): Promise<Message> {
+        const createMessageDto = {
+            sender: await this.usersService.findOne(input.sender),
+            content: input.content,
+        };
+        const createdMessage = this.messagesRepository.create(createMessageDto);
+        await this.messagesRepository.insert(createdMessage);
+        return createdMessage;
     }
 
-    async newUser(createUserDto: any): Promise<User> {
-        // check here if email isn't already used
-        if (await this.userRepository.findOne({ where: { email: createUserDto.email } })) {
-            throw new UnauthorizedException('Email already used');
-        }
-        createUserDto.credidential = 1;
-        // generate a 4-char random unique code
-        createUserDto.publicKey = Math.random()
-            .toString(36)
-            .toUpperCase()
-            .substr(2, 5)
-            .padStart(5, '0');
-        const createdUser = this.userRepository.create(createUserDto as User);
-        await this.userRepository.insert(createdUser);
-        return createdUser;
-    }
-
-    async findOne(input: any, type = 'id'): Promise<User> {
-        if (type == 'email') {
-            return await this.userRepository.findOne({ where: { email: input } });
-        }
-        if (type == 'input') {
-            return await this.userRepository.findOne({
-                where: { pseudo: input.pseudo, publicKey: input.publicKey },
-            });
-        }
-        return await this.userRepository.findOne({ where: { _id: input } });
-    }
-    async findAll(filter: FilterUserInput): Promise<User[]> {
-        return await this.userRepository.find({
-            where: filter || {}, //TODO correct filter format here
+    async newMessage(user: User, content: string): Promise<Message> {
+        return this.create({
+            sender: user._id,
+            content,
         });
     }
-    /*
 
-    async delete(id: string): Promise<UserType> {
-        return await this.userRepository.findByIdAndRemove(id);
+    async findOne(id: string): Promise<Message> {
+        return await this.messagesRepository.findOne({ relations: ['sender'], where: { _id: id } });
     }
-    */
-    /*
-    async update(id: string, input: any): Promise<User> {
-        await this.userRepository.update(id, input);
-        return this.userRepository.findOne(id);
-    }*/
+    async findAll(filter: FilterMessageInput): Promise<Message[]> {
+        return await this.messagesRepository.find({
+            relations: ['sender'],
+            where: filter || {},
+            order: { date: 'DESC' },
+        });
+    }
+
+    async delete(id: string): Promise<Message> {
+        const msg = await this.findOne(id);
+        if (!msg) {
+            return null;
+        }
+        await this.messagesRepository.delete(id);
+        return msg;
+    }
+
+    async update(id: string, content: string): Promise<Message> {
+        await this.messagesRepository.update(id, { content: content });
+        return await this.findOne(id);
+    }
 }
