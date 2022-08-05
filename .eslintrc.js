@@ -18,5 +18,14 @@ module.exports = {
         quotes: ['error', 'single'],
         semi: ['error', 'always'],
         'react/prop-types': 'off',
+        'react/jsx-indent': ['error', 4],
     },
+    overrides: [
+        {
+            files: ['.*.js'],
+            rules: {
+                'no-undef': 'off',
+            },
+        },
+    ],
 };

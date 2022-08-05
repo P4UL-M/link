@@ -14,7 +14,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useIsFocused } from '@react-navigation/native';
 import { AuthContext } from '../context/AuthContext';
 import { AxiosContext } from '../context/AxiosContext';
-import { login, refresh } from '../services/auth.service';
+import { login } from '../services/auth.service';
 
 export default function RegisterScreen(ctx) {
     const [email, setEmail] = useState(ctx.route.params.email);

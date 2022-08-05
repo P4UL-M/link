@@ -10,8 +10,6 @@ import {
     Platform,
 } from 'react-native';
 import { Button } from 'react-native-elements';
-import tw from '../../lib/tailwind'; // or, if no custom config: `from 'twrnc'`
-import { useDeviceContext } from 'twrnc';
 import { useNavigation } from '@react-navigation/native';
 import { useIsFocused } from '@react-navigation/native';
 import { AuthContext } from '../context/AuthContext';
@@ -25,7 +23,6 @@ export default function LoginScreen() {
     const authContext = useContext(AuthContext);
     const { publicAxios } = useContext(AxiosContext);
 
-    useDeviceContext(tw);
     const nav = useNavigation();
     const isFocused = useIsFocused();
 
@@ -50,6 +47,9 @@ export default function LoginScreen() {
         }
     }, [isFocused]);
 
+    /**
+     * @returns {Promise<boolean>}
+     */
     async function isRegister() {
         // check if user exists here
         const checkEmail = async () => {
@@ -89,7 +89,6 @@ export default function LoginScreen() {
     }
 
     async function loginReq() {
-        console.log('login');
         try {
             const response = await publicAxios.post('/auth/login', {
                 email,
