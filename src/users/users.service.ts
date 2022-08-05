@@ -51,12 +51,13 @@ export class UsersService {
             where: filter || {}, //TODO correct filter format here
         });
     }
-    /*
 
-    async delete(id: string): Promise<UserType> {
-        return await this.userRepository.findByIdAndRemove(id);
+    async delete(id: string): Promise<User> {
+        const user = await this.userRepository.findOne(id);
+        await this.userRepository.delete(id);
+        return user;
     }
-    */
+
     async update(id: string, input: any): Promise<User> {
         await this.userRepository.update(id, input);
         return this.userRepository.findOne(id);

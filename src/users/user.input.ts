@@ -1,6 +1,6 @@
 import { InputType, Field } from '@nestjs/graphql';
 import { FilterableField } from '@nestjs-query/query-graphql';
-import { IsEmail, IsString } from 'class-validator';
+import { IsEmail, IsString, IsOptional } from 'class-validator';
 
 @InputType()
 export class UserInput {
@@ -45,21 +45,25 @@ export class SearchUserInput {
 
 @InputType()
 export class UpdateUserInput {
-    /*
-    @Field(() => String, { nullable: true, description: 'First Name of the user' })
-    readonly firstName?: string;
-    @Field(() => String, { nullable: true, description: 'Last Name of the user' })
-    readonly lastName?: string;
-    @IsEmail()
-    @IsOptional()
     @Field(() => String, { nullable: true, description: 'E-mail of the user' })
-    readonly email?: string;
-    @Field(() => String, { nullable: true, description: 'Password of the user' })
-    readonly password?: string;
-    @IsDate()
     @IsOptional()
-    @Field(() => Date, { nullable: true, description: 'Birthdate of the user' })
-    readonly birthdate?: Date;*/
+    @IsEmail()
+    readonly email?: string;
+    @Field(() => String, { nullable: true, description: 'pseudo of the user' })
+    @IsOptional()
+    @IsString()
+    readonly pseudo?: string;
+    @Field(() => String, { nullable: true, description: 'Password of the user' })
+    @IsOptional()
+    @IsString()
+    readonly password?: string;
+    @Field(() => String, { nullable: true, description: 'Public key of the user' })
+    @IsOptional()
+    @IsString()
+    readonly publicKey?: string;
+    @Field(() => Number, { nullable: true, description: 'access of the user : bin rwrw' })
+    @IsOptional()
+    readonly credidential?: number;
 }
 
 @InputType()

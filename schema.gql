@@ -90,6 +90,8 @@ scalar DateTime
 type Mutation {
   createUser(input: UserInput!): User!
   newUser(input: NewUserInput!): User!
+  deleteUser(id: String!): User
+  updateUser(id: String!, input: UpdateUserInput!): User
   createMessage(input: MessageInput!): Message!
   newMessage(content: String!): Message!
   deleteMessage(id: String!): Message
@@ -122,6 +124,23 @@ input NewUserInput {
 
   """Password of the user"""
   password: String!
+}
+
+input UpdateUserInput {
+  """E-mail of the user"""
+  email: String
+
+  """pseudo of the user"""
+  pseudo: String
+
+  """Password of the user"""
+  password: String
+
+  """Public key of the user"""
+  publicKey: String
+
+  """access of the user : bin rwrw"""
+  credidential: Float
 }
 
 input MessageInput {
