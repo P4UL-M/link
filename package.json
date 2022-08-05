@@ -30,11 +30,12 @@
     "react-native-elements": "^3.4.2",
     "react-native-screens": "~3.11.1",
     "react-native-web": "0.17.7",
-    "twrnc": "^3.3.3"
+    "twrnc": "^3.3.3",
+    "typings": "^2.1.1"
   },
   "devDependencies": {
-    "@babel/core": "^7.12.9",
-    "eslint": "^8.20.0",
+    "@types/react": "^18.0.15",
+    "eslint": "^8.21.0",
     "eslint-plugin-react": "^7.30.1"
   },
   "private": true

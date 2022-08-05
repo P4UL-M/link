@@ -9,18 +9,18 @@ const styles = StyleSheet.create({
     inner: {
         padding: 24,
         flex: 1,
-        justifyContent: "space-around",
+        justifyContent: 'space-around',
         ...Platform.select({
             web: {
                 width: '40%',
-                alignSelf: "center"
-            }
+                alignSelf: 'center',
+            },
         }),
     },
     header: {
         fontSize: 36,
         marginBottom: 48,
-        color: '#EC8776'
+        color: '#EC8776',
     },
     textInput: {
         height: 40,
@@ -29,21 +29,21 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         marginBottom: 10,
         paddingLeft: 15,
-        outlineStyle: 'none'
+        outlineStyle: 'none',
     },
     btnContainer: {
-        backgroundColor: "white",
-        marginTop: 12
+        backgroundColor: 'white',
+        marginTop: 12,
     },
     btn: {
-        backgroundColor: "#8685EF",
+        backgroundColor: '#8685EF',
     },
-    textBtn : {
-        display: "none"
+    textBtn: {
+        display: 'none',
     },
     textBtn_text: {
-        color: "#8685EF",
-        cursor:"pointer",
-    }
+        color: '#8685EF',
+        cursor: 'pointer',
+    },
 });
 export default styles;

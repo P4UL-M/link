@@ -1,5 +1,5 @@
-import React, {useState, useRef, useEffect,useContext } from "react";
-import styles from "./style";
+import React, { useState, useRef, useEffect, useContext } from 'react';
+import styles from './style';
 import {
     Keyboard,
     KeyboardAvoidingView,
@@ -8,8 +8,8 @@ import {
     TouchableWithoutFeedback,
     View,
     Platform,
-} from "react-native";
-import { Button } from "react-native-elements";
+} from 'react-native';
+import { Button } from 'react-native-elements';
 import tw from '../../lib/tailwind'; // or, if no custom config: `from 'twrnc'`
 import { useDeviceContext } from 'twrnc';
 import { useNavigation } from '@react-navigation/native';
@@ -25,7 +25,7 @@ export default function LoginScreen() {
     const authContext = useContext(AuthContext);
     const { publicAxios } = useContext(AxiosContext);
 
-    useDeviceContext(tw)
+    useDeviceContext(tw);
     const nav = useNavigation();
     const isFocused = useIsFocused();
 
@@ -42,53 +42,49 @@ export default function LoginScreen() {
             setEmail('');
             setPassword('');
             setExists(false);
-            refresh(publicAxios, authContext).then( (state) => {
+            refresh(publicAxios, authContext).then((state) => {
                 if (state) {
                     nav.navigate('Home');
                 }
             });
         }
-    } , [isFocused])
+    }, [isFocused]);
 
     async function isRegister() {
         // check if user exists here
         const checkEmail = async () => {
             try {
-
                 const query = `query exists($email : String!) {
                     exist(email: $email)
                 }`;
-                const response = await fetch(
-                    'http://localhost:3000/graphQL', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            Accept: 'application/json',
+                const response = await fetch('http://localhost:3000/graphQL', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Accept: 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query,
+                        variables: {
+                            email: email,
                         },
-                        body: JSON.stringify({
-                            query,
-                            variables: {
-                                email: email
-                            },
-                        }),
-                    }
-                );
+                    }),
+                });
                 const json = await response.json();
                 return json.data.exist;
             } catch (error) {
                 console.error(error);
             }
         };
-        if (/\S+@\S+\.\S+/.test(email) && await checkEmail()) {
+        if (/\S+@\S+\.\S+/.test(email) && (await checkEmail())) {
             setExists(true);
             emailInput.current.style = styles.textInput;
             passwordInput.current.focus();
-            accountBtn.current.style.display = "none";
-        }
-        else {
+            accountBtn.current.style.display = 'none';
+        } else {
             setExists(false);
-            emailInput.current.style.borderColor = "red";
-            accountBtn.current.style.display = "inherit";
+            emailInput.current.style.borderColor = 'red';
+            accountBtn.current.style.display = 'inherit';
         }
     }
 
@@ -100,37 +96,46 @@ export default function LoginScreen() {
                 password,
             });
 
-            const {access_token, refresh_token} = response.data;
+            const { access_token, refresh_token } = response.data;
 
             await login(authContext, access_token, refresh_token);
-            
+
             nav.navigate('Home');
             passwordInput.current.style = styles.textInput;
         } catch (error) {
-            passwordInput.current.style.borderColor = "red";
+            passwordInput.current.style.borderColor = 'red';
             console.error(error);
         }
     }
 
     return (
         <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             style={styles.container}
         >
-            <TouchableWithoutFeedback onPress={Platform.select(
-                {native: (Keyboard.dismiss),
-                    web: (() => null)})}>
+            <TouchableWithoutFeedback
+                onPress={Platform.select({
+                    native: Keyboard.dismiss,
+                    web: () => null,
+                })}
+            >
                 <View style={styles.inner}>
                     <Text style={styles.header}>Link</Text>
                     <View>
-                        <TextInput 
-                            placeholder="email" 
+                        <TextInput
+                            placeholder="email"
                             style={styles.textInput}
-                            onSubmitEditing={() => isRegister()} 
-                            onChangeText={(text) => setEmail(text)} 
-                            ref={emailInput} 
+                            onSubmitEditing={() => isRegister()}
+                            onChangeText={(text) => setEmail(text)}
+                            ref={emailInput}
                         />
-                        <TouchableWithoutFeedback onPress={() => nav.navigate("Register", {email:email})} style={styles.textBtn} ref={accountBtn}>
+                        <TouchableWithoutFeedback
+                            onPress={() =>
+                                nav.navigate('Register', { email: email })
+                            }
+                            style={styles.textBtn}
+                            ref={accountBtn}
+                        >
                             <Text style={styles.textBtn_text}>
                                 Create Account ?
                             </Text>
@@ -139,7 +144,10 @@ export default function LoginScreen() {
                             ref={passwordInput}
                             placeholder="Password"
                             placeholderColor="#c4c3cb"
-                            style={[styles.textInput, {display: exists ? 'inherit' : 'none'}]}
+                            style={[
+                                styles.textInput,
+                                { display: exists ? 'inherit' : 'none' },
+                            ]}
                             secureTextEntry={true}
                             autoFocus={true}
                             onSubmitEditing={() => loginReq()}
@@ -147,7 +155,12 @@ export default function LoginScreen() {
                         />
                     </View>
                     <View style={styles.btnContainer}>
-                        <Button buttonStyle={styles.btn} disabled={exists ? password=="" : email==""} title={exists ? "Sign in" : "Next"} onPress={() => exists ? login() : isRegister()}/>
+                        <Button
+                            buttonStyle={styles.btn}
+                            disabled={exists ? password == '' : email == ''}
+                            title={exists ? 'Sign in' : 'Next'}
+                            onPress={() => (exists ? login() : isRegister())}
+                        />
                     </View>
                 </View>
             </TouchableWithoutFeedback>

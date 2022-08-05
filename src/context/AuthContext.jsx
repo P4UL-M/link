@@ -1,5 +1,5 @@
 //AuthContext.js
-import React, { createContext, useState } from "react";
+import React, { createContext, useState } from 'react';
 
 const AuthContext = createContext(null);
 const { Provider } = AuthContext;
@@ -35,6 +35,8 @@ const AuthProvider = ({ children }) => {
             {children}
         </Provider>
     );
+
+    // type validator for children
 };
 
 export { AuthContext, AuthProvider };

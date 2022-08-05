@@ -1,8 +1,8 @@
-import React, { createContext, useContext } from "react";
-import axios from "axios";
-import { AuthContext } from "./AuthContext";
-import createAuthRefreshInterceptor from "axios-auth-refresh";
-import { storeAuth } from "../store/authStore";
+import React, { createContext, useContext } from 'react';
+import axios from 'axios';
+import { AuthContext } from './AuthContext';
+import createAuthRefreshInterceptor from 'axios-auth-refresh';
+import { storeAuth } from '../store/authStore';
 
 const AxiosContext = createContext(null);
 const { Provider } = AxiosContext;
@@ -11,11 +11,11 @@ const AxiosProvider = ({ children }) => {
     const authContext = useContext(AuthContext);
 
     const authAxios = axios.create({
-        baseURL: "http://localhost:3000/",
+        baseURL: 'http://localhost:3000/',
     });
 
     const publicAxios = axios.create({
-        baseURL: "http://localhost:3000/",
+        baseURL: 'http://localhost:3000/',
     });
 
     authAxios.interceptors.request.use(
@@ -33,8 +33,8 @@ const AxiosProvider = ({ children }) => {
 
     const refreshAuthLogic = (failedRequest) => {
         const options = {
-            method: "GET",
-            url: "http://localhost:3000/auth/refresh",
+            method: 'GET',
+            url: 'http://localhost:3000/auth/refresh',
             headers: {
                 refresh_token: authContext.authState.refreshToken,
             },
@@ -43,7 +43,7 @@ const AxiosProvider = ({ children }) => {
         return axios(options)
             .then(async (tokenRefreshResponse) => {
                 failedRequest.response.config.headers.Authorization =
-                    "Bearer " + tokenRefreshResponse.data.access_token;
+                    'Bearer ' + tokenRefreshResponse.data.access_token;
 
                 authContext.setAuthState({
                     ...authContext.authState,
@@ -59,7 +59,7 @@ const AxiosProvider = ({ children }) => {
                 return Promise.resolve();
             })
             .catch((e) => {
-                console.log("Error refreshing token", e);
+                console.log('Error refreshing token', e);
                 authContext.setAuthState({
                     accessToken: null,
                     refreshToken: null,

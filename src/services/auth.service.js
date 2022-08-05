@@ -1,4 +1,4 @@
-import { storeAuth, getAuth, removeAuth } from "../store/authStore";
+import { storeAuth, getAuth, removeAuth } from '../store/authStore';
 
 async function login(authContext, accessToken = null, refreshToken = null) {
     if (accessToken && refreshToken) {
@@ -32,7 +32,7 @@ async function logout(authContext) {
 async function refresh(publicAxios, authContext) {
     const data = await getAuth();
     if (data) {
-        const res = await publicAxios.get("/auth/refresh", {
+        const res = await publicAxios.get('/auth/refresh', {
             headers: {
                 refresh_token: data.refreshToken,
             },

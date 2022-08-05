@@ -1,5 +1,5 @@
-import React, { useContext } from "react";
-import styles from "./style";
+import React, { useContext } from 'react';
+import styles from './style';
 import {
     Keyboard,
     KeyboardAvoidingView,
@@ -7,14 +7,14 @@ import {
     TouchableWithoutFeedback,
     View,
     Platform,
-} from "react-native";
-import { Button } from "react-native-elements";
-import tw from "../../lib/tailwind"; // or, if no custom config: `from 'twrnc'`
-import { useDeviceContext } from "twrnc";
-import { AuthContext } from "../context/AuthContext";
-import { AxiosContext } from "../context/AxiosContext";
-import { logout } from "../services/auth.service";
-import { useNavigation } from "@react-navigation/native";
+} from 'react-native';
+import { Button } from 'react-native-elements';
+import tw from '../../lib/tailwind'; // or, if no custom config: `from 'twrnc'`
+import { useDeviceContext } from 'twrnc';
+import { AuthContext } from '../context/AuthContext';
+import { AxiosContext } from '../context/AxiosContext';
+import { logout } from '../services/auth.service';
+import { useNavigation } from '@react-navigation/native';
 
 const Home = () => {
     const authContext = useContext(AuthContext);
@@ -24,7 +24,7 @@ const Home = () => {
     useDeviceContext(tw);
 
     async function getUser() {
-        const response = await authAxios.post("graphql", {
+        const response = await authAxios.post('graphql', {
             query: `
                 query {
                     whoami {
@@ -41,7 +41,7 @@ const Home = () => {
 
     return (
         <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             style={styles.container}
         >
             <TouchableWithoutFeedback
@@ -60,7 +60,7 @@ const Home = () => {
                             title="Logout"
                             onPress={() => {
                                 logout(authContext);
-                                nav.navigate("Login");
+                                nav.navigate('Login');
                             }}
                         />
                     </View>
