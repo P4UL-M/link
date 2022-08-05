@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useContext } from 'react';
-import styles from './style';
+import stylesheet from './style';
 import {
     Keyboard,
     KeyboardAvoidingView,
@@ -10,7 +10,7 @@ import {
     Platform,
 } from 'react-native';
 import { Button } from 'react-native-elements';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useTheme } from '@react-navigation/native';
 import { useIsFocused } from '@react-navigation/native';
 import { AuthContext } from '../context/AuthContext';
 import { AxiosContext } from '../context/AxiosContext';
@@ -29,6 +29,9 @@ export default function LoginScreen() {
     let emailInput = useRef(null);
     let passwordInput = useRef(null);
     let accountBtn = useRef(null);
+
+    const { colors } = useTheme();
+    const styles = stylesheet(colors);
 
     // force reload on focus of screen
     useEffect(() => {
@@ -83,7 +86,7 @@ export default function LoginScreen() {
             accountBtn.current.style.display = 'none';
         } else {
             setExists(false);
-            emailInput.current.style.borderColor = 'red';
+            emailInput.current.style.borderColor = colors.accent;
             accountBtn.current.style.display = 'inherit';
         }
     }
@@ -122,6 +125,7 @@ export default function LoginScreen() {
                     <Text style={styles.header}>Link</Text>
                     <View>
                         <TextInput
+                            textContentType='username'
                             placeholder="email"
                             style={styles.textInput}
                             onSubmitEditing={() => isRegister()}
@@ -140,9 +144,10 @@ export default function LoginScreen() {
                             </Text>
                         </TouchableWithoutFeedback>
                         <TextInput
+                            textContentType='password'
                             ref={passwordInput}
                             placeholder="Password"
-                            placeholderColor="#c4c3cb"
+                            placeholderColor={colors.border}
                             style={[
                                 styles.textInput,
                                 { display: exists ? 'inherit' : 'none' },
@@ -158,7 +163,7 @@ export default function LoginScreen() {
                             buttonStyle={styles.btn}
                             disabled={exists ? password == '' : email == ''}
                             title={exists ? 'Sign in' : 'Next'}
-                            onPress={() => (exists ? login() : isRegister())}
+                            onPress={() => (exists ? loginReq() : isRegister())}
                         />
                     </View>
                 </View>

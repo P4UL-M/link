@@ -1,5 +1,5 @@
 import React, { useContext } from 'react';
-import styles from './style';
+import stylesheet from './style';
 import {
     Keyboard,
     KeyboardAvoidingView,
@@ -9,19 +9,18 @@ import {
     Platform,
 } from 'react-native';
 import { Button } from 'react-native-elements';
-import tw from '../../lib/tailwind'; // or, if no custom config: `from 'twrnc'`
-import { useDeviceContext } from 'twrnc';
 import { AuthContext } from '../context/AuthContext';
 import { AxiosContext } from '../context/AxiosContext';
 import { logout } from '../services/auth.service';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useTheme } from '@react-navigation/native';
 
 const Home = () => {
     const authContext = useContext(AuthContext);
     const { authAxios } = useContext(AxiosContext);
     const nav = useNavigation();
 
-    useDeviceContext(tw);
+    const { colors } = useTheme();
+    const styles = stylesheet(colors);
 
     async function getUser() {
         const response = await authAxios.post('graphql', {
@@ -50,10 +49,10 @@ const Home = () => {
                     web: () => null,
                 })}
             >
-                <View style={[styles.inner, tw` bg-white dark:bg-gray-700`]}>
+                <View style={styles.inner}>
                     <Text style={styles.header}>Header</Text>
                     <View style={styles.btnContainer}>
-                        <Button title="Submit" onPress={getUser} />
+                        <Button title="Submit" onPress={getUser} buttonStyle={styles.btn} />
                     </View>
                     <View style={styles.btnContainer}>
                         <Button
@@ -62,6 +61,7 @@ const Home = () => {
                                 logout(authContext);
                                 nav.navigate('Login');
                             }}
+                            buttonStyle={styles.btn}
                         />
                     </View>
                 </View>

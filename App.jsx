@@ -6,14 +6,20 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { AuthProvider } from './src/context/AuthContext';
 import { AxiosProvider } from './src/context/AxiosContext';
 import React from 'react';
+import { useColorScheme } from 'react-native';
+import { Classic, Dark } from './src/theme/theme';
+
 
 const Stack = createNativeStackNavigator();
 
 export default function App() {
+
+    const theme = useColorScheme();
+
     return (
         <AuthProvider>
             <AxiosProvider>
-                <NavigationContainer>
+                <NavigationContainer theme={theme !== 'dark' ? Classic : Dark}>
                     <Stack.Navigator initialRouteName="Login">
                         <Stack.Screen
                             name="Login"
