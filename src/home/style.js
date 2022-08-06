@@ -23,6 +23,7 @@ const stylesheet = (colors) =>
             marginBottom: 10,
             paddingLeft: 15,
             outlineStyle: 'none',
+            color: colors.text,
         },
         btnContainer: {
             backgroundColor: colors.background,

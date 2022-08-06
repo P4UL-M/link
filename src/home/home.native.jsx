@@ -13,8 +13,55 @@ import { AuthContext } from '../context/AuthContext';
 import { AxiosContext } from '../context/AxiosContext';
 import { logout } from '../services/auth.service';
 import { useTheme } from '@react-navigation/native';
+import { createDrawerNavigator } from '@react-navigation/drawer';
 
-export default function Home({navigation}) {
+function RightDrawerContent() {
+    return (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+            <Text>This is the right drawer</Text>
+        </View>
+    );
+}
+
+const LeftDrawer = createDrawerNavigator();
+
+function LeftDrawerScreen() {
+    return (
+        <LeftDrawer.Navigator
+            id="LeftDrawer"
+            screenOptions={{ 
+                drawerPosition: 'left', 
+                headerShown: false, 
+                drawerHideStatusBarOnOpen: true,
+                drawerStatusBarAnimation: 'none', 
+            }}>
+            <LeftDrawer.Screen name="Home" component={Home} />
+        </LeftDrawer.Navigator>
+    );
+}
+
+const RightDrawer = createDrawerNavigator();
+
+function HomeScreen() {
+    return (
+        <RightDrawer.Navigator
+            hideStatusBar={true}
+            id="RightDrawer"
+            drawerContent={(props) => <RightDrawerContent {...props} />}
+            screenOptions={{
+                drawerPosition: 'right',
+                headerShown: false,
+                drawerHideStatusBarOnOpen: true,
+                drawerStatusBarAnimation: 'none',
+            }
+            }>
+            <RightDrawer.Screen name="HomeDrawer" component={LeftDrawerScreen} />
+        </RightDrawer.Navigator>
+    );
+}
+
+
+function Home({navigation}) {
     const authContext = useContext(AuthContext);
     const { authAxios } = useContext(AxiosContext);
 
@@ -68,3 +115,5 @@ export default function Home({navigation}) {
         </KeyboardAvoidingView>
     );
 }
+
+export default HomeScreen;

@@ -44,7 +44,11 @@ const styles = StyleSheet.create({
     },
     textBtn_text: {
         color: '#8685EF',
-        cursor: 'pointer',
+        ...Platform.select({
+            web: {
+                cursor: 'pointer',
+            },
+        }),
         alignSelf: 'center',
     },
 });

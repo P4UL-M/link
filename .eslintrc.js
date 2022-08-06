@@ -22,7 +22,7 @@ module.exports = {
     },
     overrides: [
         {
-            files: ['.*.js'],
+            files: ['.*.js', '*.config.js', '*.config.json'],
             rules: {
                 'no-undef': 'off',
             },

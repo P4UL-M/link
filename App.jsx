@@ -1,4 +1,4 @@
-import Home from './src/home/home';
+import HomeScreen from './src/home/home';
 import LoginScreen from './src/login/login';
 import RegisterScreen from './src/register/register';
 import { NavigationContainer } from '@react-navigation/native';
@@ -8,6 +8,7 @@ import { AxiosProvider } from './src/context/AxiosContext';
 import React from 'react';
 import { useColorScheme } from 'react-native';
 import { Classic, Dark } from './src/theme/theme';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 
 const Stack = createNativeStackNavigator();
@@ -19,25 +20,27 @@ export default function App() {
     return (
         <AuthProvider>
             <AxiosProvider>
-                <NavigationContainer theme={theme !== 'dark' ? Classic : Dark}>
-                    <Stack.Navigator initialRouteName="Login">
-                        <Stack.Screen
-                            name="Login"
-                            component={LoginScreen}
-                            options={{ headerShown: false }}
-                        />
-                        <Stack.Screen
-                            name="Home"
-                            component={Home}
-                            options={{ headerShown: false }}
-                        />
-                        <Stack.Screen
-                            name="Register"
-                            component={RegisterScreen}
-                            options={{ headerShown: false }}
-                        />
-                    </Stack.Navigator>
-                </NavigationContainer>
+                <SafeAreaView style={{ flex: 1 }}>
+                    <NavigationContainer theme={theme !== 'dark' ? Classic : Dark}>
+                        <Stack.Navigator initialRouteName="Home">
+                            <Stack.Screen
+                                name="Login"
+                                component={LoginScreen}
+                                options={{ headerShown: false }}
+                            />
+                            <Stack.Screen
+                                name="Home"
+                                component={HomeScreen}
+                                options={{ headerShown: false }}
+                            />
+                            <Stack.Screen
+                                name="Register"
+                                component={RegisterScreen}
+                                options={{ headerShown: false }}
+                            />
+                        </Stack.Navigator>
+                    </NavigationContainer>
+                </SafeAreaView>
             </AxiosProvider>
         </AuthProvider>
     );

@@ -20,7 +20,8 @@ export const Dark = {
         background: '#201F30',
         text: '#FDFEFE',
         primary: '#8685EF',
-        card: '#EC8776',
-        border: '#201F30',
+        secondary: '#EC8776',
+        accent: '#D1406C',
+        border: '#FDFEFE',
     },
 };

@@ -10,20 +10,19 @@ import {
     Platform,
 } from 'react-native';
 import { Button } from 'react-native-elements';
-import { useNavigation, useTheme } from '@react-navigation/native';
+import { useTheme } from '@react-navigation/native';
 import { useIsFocused } from '@react-navigation/native';
 import { AuthContext } from '../context/AuthContext';
 import { AxiosContext } from '../context/AxiosContext';
 import { login, refresh } from '../services/auth.service';
 
-export default function LoginScreen() {
+export default function LoginScreen({navigation}) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [exists, setExists] = useState(false);
     const authContext = useContext(AuthContext);
     const { publicAxios } = useContext(AxiosContext);
 
-    const nav = useNavigation();
     const isFocused = useIsFocused();
 
     let emailInput = useRef(null);
@@ -44,7 +43,7 @@ export default function LoginScreen() {
             setExists(false);
             refresh(publicAxios, authContext).then((state) => {
                 if (state) {
-                    nav.navigate('Home');
+                    navigation.navigate('Home');
                 }
             });
         }
@@ -102,7 +101,7 @@ export default function LoginScreen() {
 
             await login(authContext, access_token, refresh_token);
 
-            nav.navigate('Home');
+            navigation.navigate('Home');
             passwordInput.current.style = styles.textInput;
         } catch (error) {
             passwordInput.current.style.borderColor = 'red';
@@ -127,6 +126,7 @@ export default function LoginScreen() {
                         <TextInput
                             textContentType='username'
                             placeholder="email"
+                            placeholderTextColor={colors.border}
                             style={styles.textInput}
                             onSubmitEditing={() => isRegister()}
                             onChangeText={(text) => setEmail(text)}
@@ -134,7 +134,7 @@ export default function LoginScreen() {
                         />
                         <TouchableWithoutFeedback
                             onPress={() =>
-                                nav.navigate('Register', { email: email })
+                                navigation.navigate('Register', { email: email })
                             }
                             style={styles.textBtn}
                             ref={accountBtn}
@@ -147,7 +147,7 @@ export default function LoginScreen() {
                             textContentType='password'
                             ref={passwordInput}
                             placeholder="Password"
-                            placeholderColor={colors.border}
+                            placeholderTextColor={colors.border}
                             style={[
                                 styles.textInput,
                                 { display: exists ? 'inherit' : 'none' },

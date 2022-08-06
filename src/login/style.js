@@ -31,6 +31,7 @@ const stylesheet = (colors) =>
             marginBottom: 10,
             paddingLeft: 15,
             outlineStyle: 'none',
+            color: colors.text,
         },
         btnContainer: {
             backgroundColor: 'white',
@@ -44,7 +45,11 @@ const stylesheet = (colors) =>
         },
         textBtn_text: {
             color: colors.primary,
-            cursor: 'pointer',
+            ...Platform.select({
+                web: {
+                    cursor: 'pointer',
+                },
+            }),
         },
     });
 export default stylesheet;
