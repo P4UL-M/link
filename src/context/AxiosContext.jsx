@@ -58,8 +58,7 @@ const AxiosProvider = ({ children }) => {
 
                 return Promise.resolve();
             })
-            .catch((e) => {
-                console.log('Error refreshing token', e);
+            .catch(() => {
                 authContext.setAuthState({
                     accessToken: null,
                     refreshToken: null,

@@ -34,7 +34,6 @@ export default function RegisterScreen(ctx) {
 
     // force reload on focus of screen
     useEffect(() => {
-        console.log('email is ', email);
         if (isFocused) {
             emailInput.current.value = email;
             setPassword('');

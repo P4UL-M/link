@@ -30,7 +30,11 @@ const stylesheet = (colors) =>
             borderWidth: 1,
             marginBottom: 10,
             paddingLeft: 15,
-            outlineStyle: 'none',
+            ...Platform.select({
+                web: {
+                    outlineStyle: 'none',
+                },
+            }),
             color: colors.text,
         },
         btnContainer: {

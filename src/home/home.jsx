@@ -10,29 +10,34 @@ import {
 } from 'react-native';
 import { Button } from 'react-native-elements';
 import { AuthContext } from '../context/AuthContext';
-import { AxiosContext } from '../context/AxiosContext';
 import { logout } from '../services/auth.service';
 import { useTheme } from '@react-navigation/native';
+import { useApolloClient, gql } from '@apollo/client';
 
 export default function Home({navigation}) {
     const authContext = useContext(AuthContext);
-    const { authAxios } = useContext(AxiosContext);
 
     const { colors } = useTheme();
     const styles = stylesheet(colors);
+    const client = useApolloClient();
 
     async function getUser() {
-        const response = await authAxios.post('graphql', {
-            query: `
-                query {
-                    whoami {
-                        _id,
-                        pseudo,
-                        email,
-                        publicKey
-                    }
+        const response = await client.query({
+            query: gql`query whoami {
+                whoami {
+                    _id,
+                    pseudo,
+                    email,
+                    publicKey
                 }
-            `,
+            }`,
+            options: {
+                context: {
+                    headers: {
+                        'Authorization': `Bearer ${authContext.token}`,
+                    },
+                },
+            },
         });
         console.log(response);
     }

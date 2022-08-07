@@ -8,7 +8,8 @@ import { AxiosProvider } from './src/context/AxiosContext';
 import React from 'react';
 import { useColorScheme } from 'react-native';
 import { Classic, Dark } from './src/theme/theme';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
+import AuthApolloProvider from './src/context/ApolloProvider';
 
 
 const Stack = createNativeStackNavigator();
@@ -20,27 +21,31 @@ export default function App() {
     return (
         <AuthProvider>
             <AxiosProvider>
-                <SafeAreaView style={{ flex: 1 }}>
-                    <NavigationContainer theme={theme !== 'dark' ? Classic : Dark}>
-                        <Stack.Navigator initialRouteName="Home">
-                            <Stack.Screen
-                                name="Login"
-                                component={LoginScreen}
-                                options={{ headerShown: false }}
-                            />
-                            <Stack.Screen
-                                name="Home"
-                                component={HomeScreen}
-                                options={{ headerShown: false }}
-                            />
-                            <Stack.Screen
-                                name="Register"
-                                component={RegisterScreen}
-                                options={{ headerShown: false }}
-                            />
-                        </Stack.Navigator>
-                    </NavigationContainer>
-                </SafeAreaView>
+                <AuthApolloProvider>
+                    <SafeAreaProvider>
+                        <SafeAreaView style={{ flex: 1 }}>
+                            <NavigationContainer theme={theme !== 'dark' ? Classic : Dark}>
+                                <Stack.Navigator initialRouteName="Home">
+                                    <Stack.Screen
+                                        name="Login"
+                                        component={LoginScreen}
+                                        options={{ headerShown: false }}
+                                    />
+                                    <Stack.Screen
+                                        name="Home"
+                                        component={HomeScreen}
+                                        options={{ headerShown: false }}
+                                    />
+                                    <Stack.Screen
+                                        name="Register"
+                                        component={RegisterScreen}
+                                        options={{ headerShown: false }}
+                                    />
+                                </Stack.Navigator>
+                            </NavigationContainer>
+                        </SafeAreaView>
+                    </SafeAreaProvider>
+                </AuthApolloProvider>
             </AxiosProvider>
         </AuthProvider>
     );

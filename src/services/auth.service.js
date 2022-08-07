@@ -51,4 +51,28 @@ async function refresh(publicAxios, authContext) {
     return false;
 }
 
-export { login, logout, refresh };
+async function refreshCustom(publicAxios, authContext) {
+    const data = await getAuth();
+    if (data) {
+        const res = await publicAxios.get('/auth/refresh', {
+            headers: {
+                refresh_token: data.refreshToken,
+            },
+        });
+        if (res.status === 200) {
+            await storeAuth(res.data.access_token, res.data.refresh_token);
+            authContext.setAuthState({
+                accessToken: res.data.access_token,
+                refreshToken: res.data.refresh_token,
+                authenticated: true,
+            });
+            return res.data.access_token;
+        } else {
+            logout(authContext);
+            return false;
+        }
+    }
+    return false;
+}
+
+export { login, logout, refresh, refreshCustom };

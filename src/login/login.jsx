@@ -15,32 +15,31 @@ import { useIsFocused } from '@react-navigation/native';
 import { AuthContext } from '../context/AuthContext';
 import { AxiosContext } from '../context/AxiosContext';
 import { login, refresh } from '../services/auth.service';
+// Import everything needed to use the `useQuery` hook
+import { gql, useApolloClient } from '@apollo/client';
 
 export default function LoginScreen({navigation}) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [exists, setExists] = useState(false);
+    const [appState, setAppState] = useState({email_valid: false, password_valid: false});
     const authContext = useContext(AuthContext);
     const { publicAxios } = useContext(AxiosContext);
 
     const isFocused = useIsFocused();
-
-    let emailInput = useRef(null);
-    let passwordInput = useRef(null);
-    let accountBtn = useRef(null);
+    const passwordRef = useRef(null);
 
     const { colors } = useTheme();
     const styles = stylesheet(colors);
+
+    const client = useApolloClient();
 
     // force reload on focus of screen
     useEffect(() => {
         if (isFocused) {
             // clear on load
-            emailInput.current.clear();
-            passwordInput.current.clear();
             setEmail('');
             setPassword('');
-            setExists(false);
+            setAppState({email_valid: null, password_valid: null});
             refresh(publicAxios, authContext).then((state) => {
                 if (state) {
                     navigation.navigate('Home');
@@ -56,37 +55,25 @@ export default function LoginScreen({navigation}) {
         // check if user exists here
         const checkEmail = async () => {
             try {
-                const query = `query exists($email : String!) {
+                const query = gql`query exists($email : String!) {
                     exist(email: $email)
                 }`;
-                const response = await fetch('http://localhost:3000/graphQL', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        Accept: 'application/json',
+                const response = await client.query({
+                    query,
+                    variables: {
+                        email,
                     },
-                    body: JSON.stringify({
-                        query,
-                        variables: {
-                            email: email,
-                        },
-                    }),
                 });
-                const json = await response.json();
-                return json.data.exist;
+                return response.data.exist;
             } catch (error) {
                 console.error(error);
             }
         };
         if (/\S+@\S+\.\S+/.test(email) && (await checkEmail())) {
-            setExists(true);
-            emailInput.current.style = styles.textInput;
-            passwordInput.current.focus();
-            accountBtn.current.style.display = 'none';
+            setAppState({...appState, email_valid: true});
+            passwordRef.current.focus();
         } else {
-            setExists(false);
-            emailInput.current.style.borderColor = colors.accent;
-            accountBtn.current.style.display = 'inherit';
+            setAppState({...appState, email_valid: false});
         }
     }
 
@@ -102,10 +89,8 @@ export default function LoginScreen({navigation}) {
             await login(authContext, access_token, refresh_token);
 
             navigation.navigate('Home');
-            passwordInput.current.style = styles.textInput;
         } catch (error) {
-            passwordInput.current.style.borderColor = 'red';
-            console.error(error);
+            setAppState({...appState, password_valid: false});
         }
     }
 
@@ -127,43 +112,50 @@ export default function LoginScreen({navigation}) {
                             textContentType='username'
                             placeholder="email"
                             placeholderTextColor={colors.border}
-                            style={styles.textInput}
+                            style={[styles.textInput, {
+                                borderColor: appState.email_valid === false ? colors.accent : colors.border,
+                            }]}
                             onSubmitEditing={() => isRegister()}
                             onChangeText={(text) => setEmail(text)}
-                            ref={emailInput}
+                            value={email}
                         />
-                        <TouchableWithoutFeedback
-                            onPress={() =>
-                                navigation.navigate('Register', { email: email })
-                            }
-                            style={styles.textBtn}
-                            ref={accountBtn}
-                        >
-                            <Text style={styles.textBtn_text}>
-                                Create Account ?
-                            </Text>
-                        </TouchableWithoutFeedback>
+                        {
+                            appState.email_valid === false && email != '' ? <TouchableWithoutFeedback
+                                onPress={() =>
+                                    navigation.navigate('Register', { email: email })
+                                }
+                                style={styles.textBtn}
+                            >
+                                <Text style={styles.textBtn_text}>
+                                    Create Account ?
+                                </Text>
+                            </TouchableWithoutFeedback>: null
+                        }
                         <TextInput
                             textContentType='password'
-                            ref={passwordInput}
+                            ref={passwordRef}
                             placeholder="Password"
                             placeholderTextColor={colors.border}
                             style={[
                                 styles.textInput,
-                                { display: exists ? 'inherit' : 'none' },
+                                { 
+                                    display: appState.email_valid ? 'flex' : 'none',
+                                    borderColor: appState.password_valid === false ? colors.accent : colors.border, 
+                                },
                             ]}
                             secureTextEntry={true}
                             autoFocus={true}
                             onSubmitEditing={() => loginReq()}
                             onChangeText={(text) => setPassword(text)}
+                            value={password}
                         />
                     </View>
                     <View style={styles.btnContainer}>
                         <Button
                             buttonStyle={styles.btn}
-                            disabled={exists ? password == '' : email == ''}
-                            title={exists ? 'Sign in' : 'Next'}
-                            onPress={() => (exists ? loginReq() : isRegister())}
+                            disabled={appState.email_valid ? password == '' : email == ''}
+                            title={appState.email_valid ? 'Sign in' : 'Next'}
+                            onPress={() => (appState.email_valid ? loginReq() : isRegister())}
                         />
                     </View>
                 </View>
