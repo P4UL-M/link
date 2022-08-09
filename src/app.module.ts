@@ -23,6 +23,10 @@ import { setHttpPlugin } from './auth/graphQL.plugin';
         GraphQLModule.forRoot<ApolloDriverConfig>({
             driver: ApolloDriver,
             autoSchemaFile: 'schema.gql',
+            subscriptions: {
+                'graphql-ws': true,
+                'subscriptions-transport-ws': true,
+            },
             plugins: [setHttpPlugin],
         }),
         TypeOrmModule.forRootAsync({

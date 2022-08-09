@@ -8,7 +8,7 @@ import {
     UpdateUserInput,
 } from './user.input';
 import { User } from './interfaces/user.entity';
-import { GqlAuthGuard, CurrentUser } from '../auth/graphql-auth.guard';
+import { GqlAuthGuard, CurrentUser, GqlSkipFieldGuard } from '../auth/graphql-auth.guard';
 import { UseGuards, UnauthorizedException } from '@nestjs/common';
 
 @Resolver(() => User)
@@ -58,6 +58,7 @@ export class UsersResolver {
         return this.usersService.create(input as User);
     }
 
+    @UseGuards(GqlSkipFieldGuard)
     @Mutation(() => User)
     async newUser(@Args('input') input: NewUserInput): Promise<User> {
         return this.usersService.newUser(input);

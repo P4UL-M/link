@@ -34,6 +34,21 @@ type Message {
   date: String!
 }
 
+type EventMessage {
+  """message of the event"""
+  message: Message!
+
+  """type of the event"""
+  type: Action!
+}
+
+"""Action of the message"""
+enum Action {
+  NEW
+  UPDATE
+  DELETE
+}
+
 type Query {
   User(id: String, email: String, input: SearchUserInput): User
   whoami: User
@@ -149,4 +164,8 @@ input MessageInput {
 
   """Content of the message"""
   content: String!
+}
+
+type Subscription {
+  ChannelMessage: EventMessage!
 }

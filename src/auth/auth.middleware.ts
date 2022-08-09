@@ -1,10 +1,10 @@
 import { FieldMiddleware, MiddlewareContext, NextFn } from '@nestjs/graphql';
+import { UnauthorizedError } from 'type-graphql';
 
 export const pwdMiddleware: FieldMiddleware = async (ctx: MiddlewareContext, next: NextFn) => {
     const value = await next();
 
     const errorValue = 'Unauthorized'; //TODO: change this
-
     try {
         const _id = ctx.context.req.user._id;
         const _creditential = ctx.context.req.user.credidential;
@@ -15,8 +15,14 @@ export const pwdMiddleware: FieldMiddleware = async (ctx: MiddlewareContext, nex
 
         return errorValue;
     } catch (e) {
-        // no user found so no guard on request
-        return value;
+        try {
+            if (ctx.context.ignoreError) {
+                return value;
+            }
+            throw new UnauthorizedError();
+        } catch (e) {
+            return errorValue;
+        }
     }
 };
 
@@ -35,8 +41,14 @@ export const idMiddleware: FieldMiddleware = async (ctx: MiddlewareContext, next
 
         return errorValue;
     } catch (e) {
-        // no user found so no guard on request
-        return value;
+        try {
+            if (ctx.context.ignoreError) {
+                return value;
+            }
+            throw new UnauthorizedError();
+        } catch (e) {
+            return errorValue;
+        }
     }
 };
 
@@ -58,7 +70,13 @@ export const credidentialMiddleware: FieldMiddleware = async (
 
         return errorValue;
     } catch (e) {
-        // no user found so no guard on request
-        return value;
+        try {
+            if (ctx.context.ignoreError) {
+                return value;
+            }
+            throw new UnauthorizedError();
+        } catch (e) {
+            return errorValue;
+        }
     }
 };
