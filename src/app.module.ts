@@ -11,6 +11,10 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { configuration } from '../config/configuration';
 import { validationSchema } from '../config/validation';
 import { setHttpPlugin } from './auth/graphQL.plugin';
+import { ApolloArmor } from '@escape.tech/graphql-armor';
+
+const armor = new ApolloArmor();
+const protection = armor.protect();
 
 @Module({
     imports: [
@@ -27,7 +31,8 @@ import { setHttpPlugin } from './auth/graphQL.plugin';
                 'graphql-ws': true,
                 'subscriptions-transport-ws': true,
             },
-            plugins: [setHttpPlugin],
+            plugins: [setHttpPlugin, ...protection.plugins],
+            validationRules: [...protection.validationRules],
         }),
         TypeOrmModule.forRootAsync({
             imports: [ConfigModule],
