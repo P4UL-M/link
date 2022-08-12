@@ -12,6 +12,8 @@ import { configuration } from '../config/configuration';
 import { validationSchema } from '../config/validation';
 import { setHttpPlugin } from './auth/graphQL.plugin';
 import { ApolloArmor } from '@escape.tech/graphql-armor';
+import { regexDirectiveTransformer } from './directives/constraints.graphql';
+import { DirectiveLocation, GraphQLDirective, GraphQLString } from 'graphql';
 
 const armor = new ApolloArmor();
 const protection = armor.protect();
@@ -27,6 +29,20 @@ const protection = armor.protect();
         GraphQLModule.forRoot<ApolloDriverConfig>({
             driver: ApolloDriver,
             autoSchemaFile: 'schema.gql',
+            transformSchema: (schema) => regexDirectiveTransformer(schema, 'constraint'),
+            buildSchemaOptions: {
+                directives: [
+                    new GraphQLDirective({
+                        name: 'constraint',
+                        args: {
+                            pattern: {
+                                type: GraphQLString,
+                            },
+                        },
+                        locations: [DirectiveLocation.FIELD_DEFINITION],
+                    }),
+                ],
+            },
             subscriptions: {
                 'graphql-ws': true,
                 'subscriptions-transport-ws': true,

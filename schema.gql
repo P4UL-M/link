@@ -2,6 +2,8 @@
 # THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
 # ------------------------------------------------------
 
+directive @constraint(pattern: String) on FIELD_DEFINITION
+
 type User {
   _id: ID!
 

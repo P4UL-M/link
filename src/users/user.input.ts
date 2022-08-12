@@ -1,11 +1,11 @@
 import { InputType, Field } from '@nestjs/graphql';
 import { FilterableField } from '@nestjs-query/query-graphql';
-import { IsEmail, IsString, IsOptional } from 'class-validator';
+import { IsEmail, IsString, IsOptional, Matches } from 'class-validator';
 
 @InputType()
 export class UserInput {
     @Field(() => String, { description: 'Pseudo of the user' })
-    @IsString()
+    @Matches(RegExp(/^\S{2,10}$/), { message: "Pseudo don't follow the rules" })
     readonly pseudo: string;
     @Field(() => String, { description: 'E-mail of the user' })
     @IsEmail()
@@ -23,7 +23,7 @@ export class UserInput {
 @InputType()
 export class NewUserInput {
     @Field(() => String, { description: 'Pseudo of the user' })
-    @IsString()
+    @Matches(RegExp(/^\S{2,10}$/), { message: "Pseudo don't follow the rules" })
     readonly pseudo: string;
     @Field(() => String, { description: 'E-mail of the user' })
     @IsEmail()
@@ -51,7 +51,7 @@ export class UpdateUserInput {
     readonly email?: string;
     @Field(() => String, { nullable: true, description: 'pseudo of the user' })
     @IsOptional()
-    @IsString()
+    @Matches(RegExp(/^\S{2,10}$/), { message: "Pseudo don't follow the rules" })
     readonly pseudo?: string;
     @Field(() => String, { nullable: true, description: 'Password of the user' })
     @IsOptional()
