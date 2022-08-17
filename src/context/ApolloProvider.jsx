@@ -4,6 +4,7 @@ import {
     from,
     HttpLink,
     ApolloProvider,
+    split,
 } from '@apollo/client';
 import { onError } from '@apollo/client/link/error';
 import { fromPromise } from 'apollo-link';
@@ -12,8 +13,11 @@ import { AuthContext } from './AuthContext';
 import { AxiosContext } from './AxiosContext';
 import React, { useContext } from 'react';
 import { refreshCustom } from '../services/auth.service';
+import { getMainDefinition } from '@apollo/client/utilities';
+import { GraphQLWsLink } from '@apollo/client/link/subscriptions';
+import { createClient } from 'graphql-ws';
 
-function createClient(authContext, publicAxios) {
+function createApolloClient(authContext, publicAxios) {
     const authLink = setContext(() => {
         return {
             headers: {
@@ -68,11 +72,28 @@ function createClient(authContext, publicAxios) {
     });
     
     const httpLink = new HttpLink({
-        uri: 'http://localhost:3000/graphQL',
+        uri: 'http://localhost:3000/graphql',
     });
+
+
+    const wsLink = new GraphQLWsLink(createClient({
+        url: 'ws://localhost:3000/graphql',
+        shouldRetry: true,
+    }));
+
+    const splitLink = split( ({ query }) => {
+        const definition = getMainDefinition(query);
+        return (
+            definition.kind === 'OperationDefinition' &&
+            definition.operation === 'subscription'
+        );
+    },
+    wsLink,
+    httpLink,
+    );
     
     const client = new ApolloClient({
-        link: from([ authLink, refreshLink , httpLink]),
+        link: from([ authLink, refreshLink , splitLink]),
         cache: new InMemoryCache(),
     });
 
@@ -82,7 +103,7 @@ function createClient(authContext, publicAxios) {
 const AuthApolloProvider = ({ children }) => {
     const authContext = useContext(AuthContext);
     const { publicAxios } = useContext(AxiosContext);
-    const client = createClient(authContext, publicAxios);
+    const client = createApolloClient(authContext, publicAxios);
     return <ApolloProvider client={client}>
         {children}
     </ApolloProvider>;

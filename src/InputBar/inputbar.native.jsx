@@ -4,8 +4,6 @@ import {
     View,
     TextInput,
     Dimensions,
-    KeyboardAvoidingView,
-    SafeAreaView
 } from 'react-native';
 import { Button } from 'react-native-elements';
 import { useTheme } from '@react-navigation/native';
@@ -23,7 +21,6 @@ function InputBar() {
         <View style={styles.container}>
             <TextInput style={styles.textInput} placeholder="Message" />
             <Button title="Send" onPress={handleSubmit} buttonStyle={styles.btn}/>
-            <SafeAreaView/>
         </View>
     );
 }

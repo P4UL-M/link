@@ -13,6 +13,8 @@ import { AuthContext } from '../context/AuthContext';
 import { logout } from '../services/auth.service';
 import { useTheme } from '@react-navigation/native';
 import { useApolloClient, gql } from '@apollo/client';
+import MyChannel from '../Channel/channel';
+
 
 export default function Home({navigation}) {
     const authContext = useContext(AuthContext);
@@ -68,6 +70,7 @@ export default function Home({navigation}) {
                             buttonStyle={styles.btn}
                         />
                     </View>
+                    <MyChannel />
                 </View>
             </TouchableWithoutFeedback>
         </KeyboardAvoidingView>

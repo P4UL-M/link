@@ -110,6 +110,8 @@ export default function LoginScreen({navigation}) {
                     <View>
                         <TextInput
                             textContentType='username'
+                            autoCorrect={false}
+                            autoCapitalize='none'
                             placeholder="email"
                             placeholderTextColor={colors.border}
                             style={[styles.textInput, {
