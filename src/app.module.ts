@@ -14,6 +14,7 @@ import { setHttpPlugin } from './auth/graphQL.plugin';
 import { ApolloArmor } from '@escape.tech/graphql-armor';
 import { regexDirectiveTransformer } from './directives/constraints.graphql';
 import { DirectiveLocation, GraphQLDirective, GraphQLString } from 'graphql';
+import { PubSubModule } from './pubsub/pubsub.module';
 
 const armor = new ApolloArmor();
 const protection = armor.protect();
