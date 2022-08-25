@@ -25,5 +25,8 @@ const stylesheet = (colors) =>
             backgroundColor: colors.primary,
             height: 40,
         },
+        channel: {
+            flexGrow :1,
+        }
     });
 export default stylesheet;
