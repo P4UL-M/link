@@ -1,11 +1,12 @@
-import React, { useEffect, useContext, useState } from 'react';
-import stylesheet from './style';
+import React, { useEffect, useContext, useState, useRef } from 'react';
 import {
     View,
     Text,
     FlatList,
+    ActivityIndicator,
+    TouchableOpacity
 } from 'react-native';
-import { useTheme, useIsFocused } from '@react-navigation/native';
+import { useIsFocused } from '@react-navigation/native';
 import { useSubscription, gql, useApolloClient } from '@apollo/client';
 import { AuthContext } from '../context/AuthContext';
 
@@ -26,17 +27,10 @@ const SUB = gql`subscription {
 `;
 
 function MyChannel() {
-    const [messages, setMessage] = useState([
-        {
-            _id: '1',
-            sender: {
-                pseudo: 'John Doe',
-                _id: '1',
-            },
-            content: 'Hello World',
-            date: '2020-01-01',
-        },
-    ]);
+    const [messages, setMessage] = useState(
+    );
+    // ref to the flatlist
+    const flatListRef = useRef(null);
 
     const client = useApolloClient();
     const isFocused = useIsFocused();
@@ -63,17 +57,18 @@ function MyChannel() {
                 },
             },
         });
-        setMessage([...messages,...response.data.Messages.slice().reverse()]);
+        if (response.data.Messages) {
+            const _messages = response.data.Messages.slice().reverse();
+            setMessage([..._messages]);
+        }
     }
 
     useEffect(() => {
-        if (isFocused) {
+        if (isFocused && authContext.authState.authenticated) {
+            console.log('isFocused');
             getMessages();
         }
     } , [authContext.authState]);
-
-    const { colors } = useTheme();
-    const styles = stylesheet(colors);
 
     const {data, loading, error} = useSubscription(SUB);
 
@@ -87,12 +82,30 @@ function MyChannel() {
         <FlatList
             data={messages}
             renderItem={({item}) => (
-                <View>
-                    <Text>{item.sender.pseudo}</Text>
-                    <Text>{item.content}</Text>
-                </View>
+                <TouchableOpacity>
+                    <Text>{item?.sender.pseudo}</Text>
+                    <Text>{item?.content}</Text>
+                </TouchableOpacity>
             )}
             keyExtractor={item => item._id}
+            ListEmptyComponent={() => (
+                <View>
+                    <ActivityIndicator size="large" color="#0000ff" />
+                </View>
+            )}
+            extraData={messages}
+            style={{flexGrow: 1, flex:1}}
+            ref={flatListRef}
+            onLayout={() => {
+                if (flatListRef.current && messages) {
+                    flatListRef.current.scrollToEnd({animated: true});
+                }
+            } }
+            onContentSizeChange={() => {
+                if (flatListRef.current && messages) {
+                    flatListRef.current.scrollToEnd({animated: true});
+                }
+            } }
         />
     );
 }
