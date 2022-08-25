@@ -156,76 +156,9 @@ function Home() {
                         <SafeAreaView />
                         <Text style={[styles.header, {backgroundColor: 'yellow'}]}>Header</Text>
                     </View>
-                    {/* list of 50 elements */}
-                    {/* <FlatList data={[
-                        { title: 'Title Text', key: 'item1' }, 
-                        { title: 'Title Text', key: 'item2' }, 
-                        { title: 'Title Text', key: 'item3' }, 
-                        { title: 'Title Text', key: 'item4' }, 
-                        { title: 'Title Text', key: 'item5' },
-                        { title: 'Title Text', key: 'item6' },
-                        { title: 'Title Text', key: 'item7' },
-                        { title: 'Title Text', key: 'item8' },
-                        { title: 'Title Text', key: 'item9' },
-                        { title: 'Title Text', key: 'item10' },
-                        { title: 'Title Text', key: 'item11' },
-                        { title: 'Title Text', key: 'item12' },
-                        { title: 'Title Text', key: 'item13' },
-                        { title: 'Title Text', key: 'item14' },
-                        { title: 'Title Text', key: 'item15' },
-                        { title: 'Title Text', key: 'item16' },
-                        { title: 'Title Text', key: 'item17' },
-                        { title: 'Title Text', key: 'item18' },
-                        { title: 'Title Text', key: 'item19' },
-                        { title: 'Title Text', key: 'item20' },
-                        { title: 'Title Text', key: 'item21' },
-                        { title: 'Title Text', key: 'item22' },
-                        { title: 'Title Text', key: 'item23' },
-                        { title: 'Title Text', key: 'item24' },
-                        { title: 'Title Text', key: 'item25' },
-                        { title: 'Title Text', key: 'item26' },
-                        { title: 'Title Text', key: 'item27' },
-                        { title: 'Title Text', key: 'item28' },
-                        { title: 'Title Text', key: 'item29' },
-                        { title: 'Title Text', key: 'item30' },
-                        { title: 'Title Text', key: 'item31' },
-                        { title: 'Title Text', key: 'item32' },
-                        { title: 'Title Text', key: 'item33' },
-                        { title: 'Title Text', key: 'item34' },
-                        { title: 'Title Text', key: 'item35' },
-                        { title: 'Title Text', key: 'item36' },
-                        { title: 'Title Text', key: 'item37' },
-                        { title: 'Title Text', key: 'item38' },
-                        { title: 'Title Text', key: 'item39' },
-                        { title: 'Title Text', key: 'item40' },
-                        { title: 'Title Text', key: 'item41' },
-                        { title: 'Title Text', key: 'item42' },
-                        { title: 'Title Text', key: 'item43' },
-                        { title: 'Title Text', key: 'item44' },
-                        { title: 'Title Text', key: 'item45' },
-                        { title: 'Title Text', key: 'item46' },
-                        { title: 'Title Text', key: 'item47' },
-                        { title: 'Title Text', key: 'item48' },
-                        { title: 'Title Text', key: 'item49' },
-                        { title: 'Title Text', key: 'item50' },
-                    ]}
-                    refreshing={false}
-                    onRefresh={async () => {await 15;}}
-                    renderItem={({ item, separators }) => (
-                        <TouchableWithoutFeedback
-                            key={item.key}
-                            onPress={() => {}}
-                            onShowUnderlay={separators.highlight}
-                            onHideUnderlay={separators.unhighlight}>
-                            <View style={{ backgroundColor: 'white', borderColor:'blakc', borderWidth:1, borderRadius:3, alignItems: 'center', marginVertical:5 }}>
-                                <Text>{item.title}</Text>
-                                <Text>{item.key}</Text>
-                            </View>
-                        </TouchableWithoutFeedback>
-                    )}
-                    style={{ backgroundColor: 'red', flex: 1 }}
-                    /> */}
-                    <MyChannel />
+                    <View style={styles.inner}>
+                        <MyChannel />
+                    </View>
                 </View>
             </TouchableWithoutFeedback>
             <View style={{backgroundColor: 'green'}}>
