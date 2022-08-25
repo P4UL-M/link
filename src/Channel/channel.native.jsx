@@ -93,6 +93,7 @@ function MyChannel() {
                 </View>
             )}
             keyExtractor={item => item._id}
+            style={styles.channel}
         />
     );
 }
