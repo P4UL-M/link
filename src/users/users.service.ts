@@ -4,6 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './interfaces/user.entity';
 import { UnauthorizedException } from '@nestjs/common';
+import { genSalt, hash } from 'bcrypt';
 
 @Injectable()
 export class UsersService {
@@ -12,7 +13,13 @@ export class UsersService {
         private userRepository: Repository<User>
     ) {}
 
+    connectedUsers = [];
+
     async create(createUserDto: User): Promise<User> {
+        // generate a salt
+        const salt = await genSalt(10);
+        // hash the password with the salt
+        createUserDto.password = await hash(createUserDto.password, salt);
         const createdUser = this.userRepository.create(createUserDto);
         await this.userRepository.insert(createdUser);
         return createdUser;
@@ -30,6 +37,10 @@ export class UsersService {
             .toUpperCase()
             .substr(2, 5)
             .padStart(5, '0');
+        // generate a salt
+        const salt = await genSalt(10);
+        // hash the password with the salt
+        createUserDto.password = await hash(createUserDto.password, salt);
         const createdUser = this.userRepository.create(createUserDto as User);
         await this.userRepository.insert(createdUser);
         return createdUser;
@@ -59,7 +70,22 @@ export class UsersService {
     }
 
     async update(id: string, input: any): Promise<User> {
-        await this.userRepository.update(id, input);
+        if (input.password) {
+            const salt = await genSalt(10);
+            input.password = await hash(input.password, salt);
+        }
+        let user = await this.userRepository.findOne(id);
+        user = { ...user, ...input };
+        await this.userRepository.update(id, user);
         return this.userRepository.findOne(id);
+    }
+
+    async addConnectedUser(user: User) {
+        this.connectedUsers.push(user);
+    }
+    async removeConnectedUser(user: User) {
+        this.connectedUsers = this.connectedUsers.filter(
+            (connectedUser) => connectedUser._id != user._id
+        );
     }
 }

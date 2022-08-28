@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, UnauthorizedException } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { GraphQLModule } from '@nestjs/graphql';
@@ -14,7 +14,7 @@ import { setHttpPlugin } from './auth/graphQL.plugin';
 import { ApolloArmor } from '@escape.tech/graphql-armor';
 import { regexDirectiveTransformer } from './directives/constraints.graphql';
 import { DirectiveLocation, GraphQLDirective, GraphQLString } from 'graphql';
-import { PubSubModule } from './pubsub/pubsub.module';
+import { AuthService } from './auth/auth.service';
 
 const armor = new ApolloArmor();
 const protection = armor.protect();
@@ -27,29 +27,97 @@ const protection = armor.protect();
             isGlobal: true,
             validationSchema,
         }),
-        GraphQLModule.forRoot<ApolloDriverConfig>({
+        // GraphQLModule.forRoot<ApolloDriverConfig>({
+        //     driver: ApolloDriver,
+        //     autoSchemaFile: 'schema.gql',
+        //     transformSchema: (schema) => regexDirectiveTransformer(schema, 'constraint'),
+        //     buildSchemaOptions: {
+        //         directives: [
+        //             new GraphQLDirective({
+        //                 name: 'constraint',
+        //                 args: {
+        //                     pattern: {
+        //                         type: GraphQLString,
+        //                     },
+        //                 },
+        //                 locations: [DirectiveLocation.FIELD_DEFINITION],
+        //             }),
+        //         ],
+        //     },
+        //     subscriptions: {
+        //         'graphql-ws': {
+        //             onConnect: (connectionParams, webSocket, context) => {},
+        //             onDisconnect: (webSocket, context) => {},
+        //         },
+        //         'subscriptions-transport-ws': true,
+        //     },
+        //     plugins: [setHttpPlugin, ...protection.plugins],
+        //     validationRules: [...protection.validationRules],
+        // }),
+        GraphQLModule.forRootAsync({
             driver: ApolloDriver,
-            autoSchemaFile: 'schema.gql',
-            transformSchema: (schema) => regexDirectiveTransformer(schema, 'constraint'),
-            buildSchemaOptions: {
-                directives: [
-                    new GraphQLDirective({
-                        name: 'constraint',
-                        args: {
-                            pattern: {
-                                type: GraphQLString,
+            imports: [AuthModule],
+            useFactory: async (authService: AuthService) => ({
+                autoSchemaFile: 'schema.gql',
+                transformSchema: (schema) => regexDirectiveTransformer(schema, 'constraint'),
+                buildSchemaOptions: {
+                    directives: [
+                        new GraphQLDirective({
+                            name: 'constraint',
+                            args: {
+                                pattern: {
+                                    type: GraphQLString,
+                                },
                             },
+                            locations: [DirectiveLocation.FIELD_DEFINITION],
+                        }),
+                    ],
+                },
+                subscriptions: {
+                    'graphql-ws': {
+                        onConnect: async (ctx) => {
+                            const { connectionParams } = ctx;
+                            const token = connectionParams.Authorization.split(' ')[1];
+                            if (token) {
+                                const user = await authService.verifyToken(token);
+                                if (user) {
+                                    ctx.extra.req = {
+                                        user: {
+                                            ...user,
+                                        },
+                                    };
+                                }
+                            }
                         },
-                        locations: [DirectiveLocation.FIELD_DEFINITION],
-                    }),
-                ],
-            },
-            subscriptions: {
-                'graphql-ws': true,
-                'subscriptions-transport-ws': true,
-            },
-            plugins: [setHttpPlugin, ...protection.plugins],
-            validationRules: [...protection.validationRules],
+                        onDisconnect: (webSocket, context) => {
+                            null;
+                        },
+                    },
+                    'subscriptions-transport-ws': {
+                        onConnect: async (connectionParams: any, webSocket, context) => {
+                            const token = connectionParams.Authorization.split(' ')[1];
+                            if (token) {
+                                const user = await authService.verifyToken(token);
+                                if (user) {
+                                    context.req = {
+                                        user: {
+                                            ...user,
+                                        },
+                                    };
+                                }
+                            }
+                            return context;
+                        },
+                    },
+                },
+                context: async ({ extra }) => {
+                    return extra;
+                },
+                plugins: [setHttpPlugin, ...protection.plugins],
+                validationRules: [...protection.validationRules],
+            }),
+            // inject: AuthService
+            inject: [AuthService],
         }),
         TypeOrmModule.forRootAsync({
             imports: [ConfigModule],

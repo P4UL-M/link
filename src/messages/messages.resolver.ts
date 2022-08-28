@@ -2,16 +2,18 @@ import { Resolver, Query, Mutation, Args, Subscription } from '@nestjs/graphql';
 import { MessagesService } from './messages.service';
 import { MessageInput, FilterMessageInput } from './message.input';
 import { Message } from './interfaces/message.entity';
-import { GqlAuthGuard, CurrentUser } from '../auth/graphql-auth.guard';
-import { UseGuards, UnauthorizedException } from '@nestjs/common';
+import { GqlAuthGuard, CurrentUser, GqlSubdGuard } from '../auth/graphql-auth.guard';
+import { UseGuards, UnauthorizedException, Inject } from '@nestjs/common';
 import { User } from '../users/interfaces/user.entity';
 import { PubSub } from 'graphql-subscriptions';
 import { EventMessage, Action } from './interfaces/event.entity';
 
-const pubSub = new PubSub();
 @Resolver(() => Message)
 export class MessagesResolver {
-    constructor(private readonly messagesService: MessagesService) {}
+    constructor(
+        private readonly messagesService: MessagesService,
+        @Inject('PUB_SUB') private readonly pubSub: PubSub
+    ) {}
 
     @UseGuards(GqlAuthGuard)
     @Query(() => Message, { nullable: true })
@@ -31,7 +33,7 @@ export class MessagesResolver {
     @Mutation(() => Message)
     async createMessage(@Args('input') input: MessageInput): Promise<Message> {
         const msg = await this.messagesService.create(input);
-        pubSub.publish('channelMessage', {
+        this.pubSub.publish('channelMessage', {
             ChannelMessage: {
                 message: msg,
                 type: Action.NEW,
@@ -47,7 +49,7 @@ export class MessagesResolver {
         @Args('content') content: string
     ): Promise<Message> {
         const msg = await this.messagesService.newMessage(user, content);
-        pubSub.publish('channelMessage', {
+        this.pubSub.publish('channelMessage', {
             ChannelMessage: {
                 message: msg,
                 type: Action.NEW,
@@ -66,7 +68,7 @@ export class MessagesResolver {
             // check if user can delete message
             throw new UnauthorizedException();
         }
-        pubSub.publish('channelMessage', {
+        this.pubSub.publish('channelMessage', {
             ChannelMessage: {
                 message: msg,
                 type: Action.DELETE,
@@ -89,7 +91,7 @@ export class MessagesResolver {
             // check if user can update message
             throw new UnauthorizedException();
         }
-        pubSub.publish('channelMessage', {
+        this.pubSub.publish('channelMessage', {
             ChannelMessage: {
                 message: msg,
                 type: Action.UPDATE,
@@ -98,8 +100,10 @@ export class MessagesResolver {
         return this.messagesService.update(id, content);
     }
 
+    @UseGuards(GqlSubdGuard)
     @Subscription(() => EventMessage)
-    async ChannelMessage() {
-        return pubSub.asyncIterator('channelMessage');
+    async ChannelMessage(@CurrentUser() user: User) {
+        console.log('user', user.pseudo, 'subscribe to channelMessage');
+        return this.pubSub.asyncIterator('channelMessage');
     }
 }

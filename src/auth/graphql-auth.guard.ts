@@ -1,6 +1,12 @@
-import { Injectable, ExecutionContext, createParamDecorator } from '@nestjs/common';
+import {
+    Injectable,
+    ExecutionContext,
+    createParamDecorator,
+    UnauthorizedException,
+} from '@nestjs/common';
 import { GqlExecutionContext } from '@nestjs/graphql';
 import { AuthGuard } from '@nestjs/passport';
+import { Observable } from 'rxjs';
 
 @Injectable()
 export class GqlAuthGuard extends AuthGuard('jwt') {
@@ -19,6 +25,22 @@ export class GqlSkipFieldGuard extends AuthGuard('Empty') {
 
     handleRequest() {
         return null;
+    }
+}
+
+@Injectable()
+export class GqlSubdGuard extends AuthGuard('Empty') {
+    getRequest(context: ExecutionContext) {
+        const ctx = GqlExecutionContext.create(context);
+        return ctx.getContext().req;
+    }
+
+    canActivate(context: ExecutionContext): boolean | Promise<boolean> | Observable<boolean> {
+        const req = this.getRequest(context);
+        if (req) {
+            return true;
+        }
+        throw new UnauthorizedException();
     }
 }
 
