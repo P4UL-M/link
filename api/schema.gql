@@ -1,0 +1,173 @@
+# ------------------------------------------------------
+# THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
+# ------------------------------------------------------
+
+directive @constraint(pattern: String) on FIELD_DEFINITION
+
+type User {
+  _id: ID!
+
+  """Pseudo of the user"""
+  pseudo: String!
+
+  """E-mail of the user"""
+  email: String!
+
+  """Password of the user"""
+  password: String!
+
+  """Public key of the user"""
+  publicKey: String!
+
+  """access of the user : bin rwrw"""
+  credidential: Float!
+}
+
+type Message {
+  _id: ID!
+
+  """sender of the message"""
+  sender: User!
+
+  """Content of the message"""
+  content: String!
+
+  """Date of the message"""
+  date: String!
+}
+
+type EventMessage {
+  """message of the event"""
+  message: Message!
+
+  """type of the event"""
+  type: Action!
+}
+
+"""Action of the message"""
+enum Action {
+  NEW
+  UPDATE
+  DELETE
+}
+
+type Query {
+  User(id: String, email: String, input: SearchUserInput): User
+  whoami: User
+  exist(email: String!): Boolean!
+  Users(filter: FilterUserInput): [User!]!
+  Message(id: String!): Message
+  Messages(filter: FilterMessageInput): [Message!]!
+}
+
+input SearchUserInput {
+  """Pseudo of the user"""
+  pseudo: String!
+
+  """Public key of the user"""
+  publicKey: String!
+}
+
+input FilterUserInput {
+  """Pseudo of the user"""
+  pseudo: [String!]
+
+  """E-mail of the user"""
+  email: [String!]
+
+  """Password of the user"""
+  password: [String!]
+
+  """Public key of the user"""
+  publicKey: [String!]
+
+  """access of the user : bin rwrw"""
+  credidential: [Float!]
+}
+
+input FilterMessageInput {
+  """id of the message"""
+  _id: [ID!]
+
+  """sender of the message"""
+  sender: [ID!]
+
+  """Content of the message"""
+  content: [String!]
+
+  """Date of the message"""
+  date: [DateTime!]
+}
+
+"""
+A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
+"""
+scalar DateTime
+
+type Mutation {
+  createUser(input: UserInput!): User!
+  newUser(input: NewUserInput!): User!
+  deleteUser(id: String!): User
+  updateUser(id: String!, input: UpdateUserInput!): User
+  createMessage(input: MessageInput!): Message!
+  newMessage(content: String!): Message!
+  deleteMessage(id: String!): Message
+  updateMessage(id: String!, content: String!): Message
+}
+
+input UserInput {
+  """Pseudo of the user"""
+  pseudo: String!
+
+  """E-mail of the user"""
+  email: String!
+
+  """Password of the user"""
+  password: String!
+
+  """Public key of the user"""
+  publicKey: String!
+
+  """access of the user : bin rwrw"""
+  credidential: Float!
+}
+
+input NewUserInput {
+  """Pseudo of the user"""
+  pseudo: String!
+
+  """E-mail of the user"""
+  email: String!
+
+  """Password of the user"""
+  password: String!
+}
+
+input UpdateUserInput {
+  """E-mail of the user"""
+  email: String
+
+  """pseudo of the user"""
+  pseudo: String
+
+  """Password of the user"""
+  password: String
+
+  """Public key of the user"""
+  publicKey: String
+
+  """access of the user : bin rwrw"""
+  credidential: Float
+}
+
+input MessageInput {
+  """sender of the message"""
+  sender: ID!
+
+  """Content of the message"""
+  content: String!
+}
+
+type Subscription {
+  ChannelMessage: EventMessage!
+}
