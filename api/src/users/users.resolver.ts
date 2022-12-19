@@ -1,4 +1,12 @@
-import { Resolver, Query, Mutation, Args } from '@nestjs/graphql';
+import {
+    Resolver,
+    Query,
+    Mutation,
+    Args,
+    Subscription,
+    ResolveField,
+    Parent,
+} from '@nestjs/graphql';
 import { UsersService } from './users.service';
 import {
     UserInput,
@@ -8,12 +16,21 @@ import {
     UpdateUserInput,
 } from './user.input';
 import { User } from './interfaces/user.entity';
-import { GqlAuthGuard, CurrentUser, GqlSkipFieldGuard } from '../auth/graphql-auth.guard';
-import { UseGuards, UnauthorizedException } from '@nestjs/common';
+import {
+    GqlAuthGuard,
+    CurrentUser,
+    GqlSkipFieldGuard,
+    GqlSubdGuard,
+} from '../auth/graphql-auth.guard';
+import { UseGuards, UnauthorizedException, Inject } from '@nestjs/common';
+import { PubSub } from 'graphql-subscriptions';
 
 @Resolver(() => User)
 export class UsersResolver {
-    constructor(private readonly usersService: UsersService) {}
+    constructor(
+        private readonly usersService: UsersService,
+        @Inject('PUB_SUB') private readonly pubSub: PubSub
+    ) {}
 
     @UseGuards(GqlAuthGuard)
     @Query(() => User, { nullable: true })
@@ -84,5 +101,16 @@ export class UsersResolver {
             throw new UnauthorizedException('You are not allowed to update this user');
         }
         return this.usersService.update(id, input as User);
+    }
+
+    @ResolveField(() => Boolean)
+    async isConnected(@Parent() user: User): Promise<boolean> {
+        return await this.usersService.isConnected(user._id);
+    }
+
+    @UseGuards(GqlSubdGuard)
+    @Subscription(() => User)
+    async connectedUser() {
+        return this.pubSub.asyncIterator('connectedUser');
     }
 }

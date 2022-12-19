@@ -88,4 +88,8 @@ export class UsersService {
             (connectedUser) => connectedUser._id != user._id
         );
     }
+
+    async isConnected(id: string): Promise<boolean> {
+        return this.connectedUsers.some((connectedUser) => connectedUser._id == id);
+    }
 }

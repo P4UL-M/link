@@ -15,9 +15,27 @@ import { ApolloArmor } from '@escape.tech/graphql-armor';
 import { regexDirectiveTransformer } from './directives/constraints.graphql';
 import { DirectiveLocation, GraphQLDirective, GraphQLString } from 'graphql';
 import { AuthService } from './auth/auth.service';
+import { UsersService } from './users/users.service';
+import { PubSubModule } from './pubsub/pubsub.module';
+import { PubSubEngine } from 'type-graphql';
 
 const armor = new ApolloArmor();
 const protection = armor.protect();
+
+const log = console.log;
+
+console.log = function (...args) {
+    log.apply(
+        console,
+        [
+            '\x1b[4m\x1b[36m%s\x1b[0m',
+            'LOG',
+            '\x1b[31m#',
+            new Date().toLocaleString('en-GB', { timeZone: 'UTC' }),
+            ':\x1b[0m',
+        ].concat(args)
+    );
+};
 
 @Module({
     imports: [
@@ -27,37 +45,14 @@ const protection = armor.protect();
             isGlobal: true,
             validationSchema,
         }),
-        // GraphQLModule.forRoot<ApolloDriverConfig>({
-        //     driver: ApolloDriver,
-        //     autoSchemaFile: 'schema.gql',
-        //     transformSchema: (schema) => regexDirectiveTransformer(schema, 'constraint'),
-        //     buildSchemaOptions: {
-        //         directives: [
-        //             new GraphQLDirective({
-        //                 name: 'constraint',
-        //                 args: {
-        //                     pattern: {
-        //                         type: GraphQLString,
-        //                     },
-        //                 },
-        //                 locations: [DirectiveLocation.FIELD_DEFINITION],
-        //             }),
-        //         ],
-        //     },
-        //     subscriptions: {
-        //         'graphql-ws': {
-        //             onConnect: (connectionParams, webSocket, context) => {},
-        //             onDisconnect: (webSocket, context) => {},
-        //         },
-        //         'subscriptions-transport-ws': true,
-        //     },
-        //     plugins: [setHttpPlugin, ...protection.plugins],
-        //     validationRules: [...protection.validationRules],
-        // }),
         GraphQLModule.forRootAsync({
             driver: ApolloDriver,
-            imports: [AuthModule],
-            useFactory: async (authService: AuthService) => ({
+            imports: [AuthModule, UsersModule],
+            useFactory: async (
+                authService: AuthService,
+                usersService: UsersService,
+                pubSub: PubSubEngine
+            ) => ({
                 autoSchemaFile: 'schema.gql',
                 transformSchema: (schema) => regexDirectiveTransformer(schema, 'constraint'),
                 buildSchemaOptions: {
@@ -81,16 +76,29 @@ const protection = armor.protect();
                             if (token) {
                                 const user = await authService.verifyToken(token);
                                 if (user) {
+                                    console.log('user connected', user.pseudo);
                                     ctx.extra.req = {
                                         user: {
                                             ...user,
                                         },
                                     };
+                                } else {
+                                    console.log('Unauthorized');
                                 }
+                            } else {
+                                console.log('no token');
                             }
                         },
-                        onDisconnect: (webSocket, context) => {
-                            null;
+                        onDisconnect: ({ extra }) => {
+                            if (extra.req?.user) {
+                                console.log('user disconnected', extra.req.user.pseudo);
+                                usersService.connectedUsers = usersService.connectedUsers.filter(
+                                    (user) => user._id !== extra.req.user._id
+                                );
+                                pubSub.publish('connectedUser', {
+                                    connectedUser: extra.req.user,
+                                });
+                            }
                         },
                     },
                     'subscriptions-transport-ws': {
@@ -99,6 +107,8 @@ const protection = armor.protect();
                             if (token) {
                                 const user = await authService.verifyToken(token);
                                 if (user) {
+                                    usersService.connectedUsers.push(user);
+                                    pubSub.publish('userConnected', { userConnected: user });
                                     context.req = {
                                         user: {
                                             ...user,
@@ -107,6 +117,16 @@ const protection = armor.protect();
                                 }
                             }
                             return context;
+                        },
+                        onDisconnect: ({ context }) => {
+                            if (context.req?.user) {
+                                usersService.connectedUsers = usersService.connectedUsers.filter(
+                                    (user) => user.id !== context.req.user.id
+                                );
+                                pubSub.publish('connectedUser', {
+                                    connectedUser: context.req.user,
+                                });
+                            }
                         },
                     },
                 },
@@ -117,7 +137,7 @@ const protection = armor.protect();
                 validationRules: [...protection.validationRules],
             }),
             // inject: AuthService
-            inject: [AuthService],
+            inject: [AuthService, UsersService, 'PUB_SUB'],
         }),
         TypeOrmModule.forRootAsync({
             imports: [ConfigModule],
@@ -130,11 +150,13 @@ const protection = armor.protect();
                 database: 'link',
                 entities: ['dist/**/*.entity.js'],
                 synchronize: true,
+                charset: 'utf8mb4',
             }),
             inject: [ConfigService],
         }),
         UsersModule,
         AuthModule,
+        PubSubModule,
         MessagesModule,
     ],
     controllers: [AppController],

@@ -21,6 +21,7 @@ type User {
 
   """access of the user : bin rwrw"""
   credidential: Float!
+  isConnected: Boolean!
 }
 
 type Message {
@@ -169,5 +170,6 @@ input MessageInput {
 }
 
 type Subscription {
+  connectedUser: User!
   ChannelMessage: EventMessage!
 }

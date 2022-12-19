@@ -32,6 +32,7 @@ export class GqlSkipFieldGuard extends AuthGuard('Empty') {
 export class GqlSubdGuard extends AuthGuard('Empty') {
     getRequest(context: ExecutionContext) {
         const ctx = GqlExecutionContext.create(context);
+        ctx.getContext().mysub = true;
         return ctx.getContext().req;
     }
 

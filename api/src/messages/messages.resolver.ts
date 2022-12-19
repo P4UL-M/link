@@ -7,11 +7,13 @@ import { UseGuards, UnauthorizedException, Inject } from '@nestjs/common';
 import { User } from '../users/interfaces/user.entity';
 import { PubSub } from 'graphql-subscriptions';
 import { EventMessage, Action } from './interfaces/event.entity';
+import { UsersService } from '../users/users.service';
 
 @Resolver(() => Message)
 export class MessagesResolver {
     constructor(
         private readonly messagesService: MessagesService,
+        private usersService: UsersService,
         @Inject('PUB_SUB') private readonly pubSub: PubSub
     ) {}
 
@@ -104,6 +106,8 @@ export class MessagesResolver {
     @Subscription(() => EventMessage)
     async ChannelMessage(@CurrentUser() user: User) {
         console.log('user', user.pseudo, 'subscribe to channelMessage');
+        this.usersService.connectedUsers.push(user);
+        await this.pubSub.publish('connectedUser', { connectedUser: user });
         return this.pubSub.asyncIterator('channelMessage');
     }
 }

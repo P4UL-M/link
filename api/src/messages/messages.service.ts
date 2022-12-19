@@ -38,7 +38,7 @@ export class MessagesService {
         return await this.messagesRepository.find({
             relations: ['sender'],
             where: filter || {},
-            order: { date: 'DESC' },
+            order: { date: 'ASC' },
         });
     }
 
