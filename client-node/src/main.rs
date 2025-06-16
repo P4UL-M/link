@@ -1,8 +1,5 @@
 use crate::message::{Message, MessageType, Serializable};
-use std::collections::HashSet;
-use std::net::IpAddr;
-use std::sync::{Arc, Mutex};
-use uuid::Uuid;
+use std::sync::Arc;
 
 mod client;
 mod message;
@@ -21,7 +18,6 @@ async fn main() -> std::io::Result<()> {
     // Listen for incoming packets
     let mut buf = [0u8; 512];
     let client = Arc::new(client);
-    let seen_messages: Arc<Mutex<HashSet<(IpAddr, Uuid)>>> = Arc::new(Mutex::new(HashSet::new()));
     loop {
         match client.recv_from(&mut buf) {
             Ok((n, src)) => {
@@ -39,49 +35,50 @@ async fn main() -> std::io::Result<()> {
                                     .map(|b| b.to_string())
                                     .collect::<Vec<String>>()
                                     .join("."),
-                                src
+                                src.ip()
                             );
                             // Send request to the discovered peer with hello message
                             let hello_msg = Message::new(
                                 MessageType::Request,
                                 client.my_ip.as_str(),
                                 msg.source,
-                                Some(b"Hello from client!"),
+                                Some(
+                                    format!(
+                                        "Hello from client {}!",
+                                        client.my_ip.split('.').collect::<Vec<&str>>()[3]
+                                    )
+                                    .as_bytes(),
+                                ),
                             );
                             let client = client.clone();
                             tokio::spawn(async move {
                                 match client.send_reliable(hello_msg, &src.to_string()).await {
-                                    Ok(_) => println!("Request sent successfully"),
+                                    Ok(_) => (),
                                     Err(e) => eprintln!("Failed to send request: {}", e),
                                 }
                             });
                         }
                     }
                     MessageType::Request => {
-                        println!("Received request from {}: {:?}", src, msg);
-                        // Check if the message has already been seen
-                        let src_ip = src.ip();
-                        let message_key = (src_ip, msg.id);
+                        // ! Think if acknowledgment should be sent before of after duplicate check
+                        client.send_ack(&msg, &src.to_string());
 
-                        let mut seen = seen_messages.lock().unwrap();
-                        if !seen.insert(message_key) {
-                            // Already seen — skip processing
+                        if !client.should_process(src.ip(), msg.id) {
                             continue;
                         }
-                        // Send acknowledgment back to the requester
-                        let ack_msg = Message::new_with_id(
-                            msg.id,
-                            MessageType::Acknowledgment,
-                            client.my_ip.as_str(),
-                            msg.source,
-                            None,
+
+                        // Process the request message
+                        println!(
+                            "Received message from {}: {}",
+                            src.ip(),
+                            msg.data
+                                .as_ref()
+                                .map(|d| String::from_utf8_lossy(d))
+                                .unwrap_or_else(|| "No data".into())
                         );
-                        client
-                            .send_to(&ack_msg.serialize(), &src.to_string())
-                            .expect("Failed to send acknowledgment");
                     }
                     MessageType::Acknowledgment => {
-                        println!("Received acknowledgment from {} ({:?})", src, msg.id);
+                        client.acknowledge(msg.id);
                     }
                     MessageType::Error => {
                         eprintln!("Error message from {}: {:?}", src, msg);

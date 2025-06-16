@@ -1,19 +1,25 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
+use std::net::IpAddr;
 use std::net::UdpSocket;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 use tokio::sync::Notify;
-use tokio::time::Duration;
+use uuid::Uuid;
 
 use crate::message::{Message, MessageType, Serializable};
 
 const PORT: u16 = 34254;
 const INTERFACE: &str = "10.10.0.";
 
+const DROPOUT_TEST_RATIO: f32 = 0.5f32; // 50% chance of packet loss
+
 pub struct Client {
     socket: UdpSocket,
     pub my_ip: String,
     pending_acks: Arc<Mutex<HashMap<uuid::Uuid, Arc<Notify>>>>,
+    seen_messages: Arc<Mutex<HashSet<(std::net::IpAddr, uuid::Uuid, std::time::Instant)>>>,
 }
 
 impl Client {
@@ -37,6 +43,7 @@ impl Client {
             socket,
             my_ip,
             pending_acks: Arc::new(Mutex::new(HashMap::new())),
+            seen_messages: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -59,6 +66,13 @@ impl Client {
     }
 
     pub fn send_to(&self, msg: &[u8], addr: &str) -> std::io::Result<usize> {
+        // Simulate packet loss for dropout test only on request messages
+        if rand::random::<f32>() < DROPOUT_TEST_RATIO && msg[16].eq(&(MessageType::Request as u8)) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Simulated packet loss",
+            ));
+        }
         self.socket.send_to(msg, addr)
     }
 
@@ -85,10 +99,10 @@ impl Client {
         let serialized = msg.serialize();
 
         for _ in 0..5 {
-            self.send_to(&serialized, dest)?;
+            let _ = self.send_to(&serialized, dest);
             // Wait for ack or timeout
             let notified =
-                tokio::time::timeout(Duration::from_millis(500), notify.notified()).await;
+                tokio::time::timeout(Duration::from_millis(250), notify.notified()).await;
             if notified.is_ok() {
                 // Acknowledgment received
                 let mut pending = self.pending_acks.lock().unwrap();
@@ -111,10 +125,49 @@ impl Client {
             socket: self.socket.try_clone()?,
             my_ip: self.my_ip.clone(),
             pending_acks: Arc::clone(&self.pending_acks),
+            seen_messages: Arc::clone(&self.seen_messages),
         })
     }
 
     pub fn recv_from(&self, buf: &mut [u8]) -> std::io::Result<(usize, std::net::SocketAddr)> {
         self.socket.recv_from(buf)
+    }
+
+    pub fn should_process(&self, src_ip: IpAddr, msg_id: Uuid) -> bool {
+        let now = Instant::now();
+        let mut seen = self.seen_messages.lock().unwrap();
+
+        // Clean old entries
+        seen.retain(|&(_, _, timestamp)| now.duration_since(timestamp).as_secs() < 300);
+
+        // Check for duplicate
+        if seen
+            .iter()
+            .any(|(ip, id, _)| *ip == src_ip && *id == msg_id)
+        {
+            return false;
+        }
+
+        seen.insert((src_ip, msg_id, now));
+        true
+    }
+
+    pub fn acknowledge(&self, msg_id: uuid::Uuid) {
+        if let Ok(mut pending) = self.pending_acks.lock() {
+            if let Some(notify) = pending.remove(&msg_id) {
+                notify.notify_one();
+            }
+        }
+    }
+
+    pub fn send_ack(&self, msg: &Message, src: &str) {
+        let ack_msg = Message::new_with_id(
+            msg.id,
+            MessageType::Acknowledgment,
+            self.my_ip.as_str(),
+            msg.source,
+            None,
+        );
+        let _ = self.send_to(&ack_msg.serialize(), src);
     }
 }
