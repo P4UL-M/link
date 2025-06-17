@@ -20,7 +20,7 @@ use tokio::time::{Duration, Instant, timeout};
 mod client;
 mod packet;
 pub mod utils; // or pub mod ip;
-pub use utils::ip::IntoIpv4Bytes; // Re-export for top-level access
+pub use utils::ip::{IntoIpv4Bytes, IntoIpv4String}; // Re-export for top-level access
 
 const MESSAGE_CAPACITY: usize = 50; // Maximum number of messages to keep in the UI
 
@@ -166,9 +166,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 .map(|b| b.to_string())
                                 .collect::<Vec<_>>()
                                 .join(".");
-
                             tokio::spawn(async move {
-                                if let Err(e) = client.send_reliable(msg, &target_str).await {
+                                if let Err(e) = client.send_reliable(msg, ip).await {
                                     push_error!(
                                         tx,
                                         format!("Failed to send message to {}: {}", target_str, e)
@@ -182,11 +181,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 [255, 255, 255, 255], // Broadcast
                                 Some(input.as_bytes()),
                             );
+                            let peers = known_peers.lock().await;
+                            let peers = peers.keys().cloned().collect::<Vec<_>>();
                             tokio::spawn(async move {
-                                if let Err(e) = client.send_to_broadcast_reliable(msg).await {
+                                if let Err(e) = client.send_multicast_reliable(msg, peers).await {
                                     push_error!(
                                         tx,
-                                        format!("Failed to send broadcast message: {}", e)
+                                        format!("Failed to send multicast message: {}", e)
                                     );
                                 }
                             });

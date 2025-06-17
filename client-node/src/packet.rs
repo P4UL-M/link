@@ -52,6 +52,16 @@ impl Packet {
             data: data.map(|d| d.to_vec()),
         }
     }
+
+    pub fn clone_with_new_id(&self) -> Self {
+        Packet {
+            id: uuid::Uuid::new_v4(),
+            type_: self.type_,
+            source: self.source,
+            destination: self.destination,
+            data: self.data.clone(),
+        }
+    }
 }
 
 impl Serializable for Packet {

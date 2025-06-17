@@ -1,3 +1,6 @@
+use crate::packet::{Packet, PacketType, Serializable};
+use crate::utils::ip::IntoIpv4String;
+use futures::future::join_all;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::IpAddr;
@@ -7,12 +10,11 @@ use tokio::net::UdpSocket;
 use tokio::sync::Notify;
 use uuid::Uuid;
 
-use crate::packet::{Packet, PacketType, Serializable};
-
 const PORT: u16 = 34254;
 const INTERFACE: &str = "10.10.0.";
 
-const DROPOUT_TEST_RATIO: f32 = 0.7; // 70% chance of packet loss
+const DROPOUT_TEST_RATIO: f32 = 0.8; // 70% chance of packet loss
+const DROP_DELAY_MS: u64 = 10; // Delay for dropout test
 
 pub struct Client {
     socket: UdpSocket,
@@ -68,7 +70,7 @@ impl Client {
         Ok(())
     }
 
-    pub async fn send_to(&self, msg: &[u8], addr: &str) -> std::io::Result<usize> {
+    pub async fn send_to<A: IntoIpv4String>(&self, msg: &[u8], addr: A) -> std::io::Result<usize> {
         // Simulate packet loss for dropout test only on request messages
         if rand::random::<f32>() < DROPOUT_TEST_RATIO && msg[16].eq(&(PacketType::Request as u8)) {
             return Err(std::io::Error::new(
@@ -78,13 +80,17 @@ impl Client {
         }
         // Simulate a delay for dropout test
         if rand::random::<f32>() < DROPOUT_TEST_RATIO && msg[16].eq(&(PacketType::Request as u8)) {
-            tokio::time::sleep(Duration::from_millis(200 + rand::random::<u64>() % 800)).await;
+            tokio::time::sleep(Duration::from_millis(
+                DROP_DELAY_MS + rand::random::<u64>() % (DROP_DELAY_MS * 4),
+            ))
+            .await;
         }
-        // if port is not specified, use the default port
-        let addr = if addr.contains(':') {
-            addr.to_string()
+        // Utilisation du trait pour obtenir la chaîne d'adresse
+        let addr_str = addr.into_ipv4_string();
+        let addr = if addr_str.contains(':') {
+            addr_str
         } else {
-            format!("{}:{}", addr, PORT)
+            format!("{}:{}", addr_str, PORT)
         };
         // Check if the address is valid
         let addr: std::net::SocketAddr = addr.parse().expect("Invalid address format");
@@ -98,11 +104,14 @@ impl Client {
                 continue;
             }
             let addr = format!("{}:{}", ip, PORT);
-            let _ = self.send_to(msg, &addr).await;
+            let _ = self.send_to(msg, addr).await;
         }
     }
 
-    pub async fn send_reliable(&self, msg: Packet, dest: &str) -> std::io::Result<()> {
+    pub async fn send_reliable<A>(&self, msg: Packet, dest: A) -> std::io::Result<()>
+    where
+        for<'a> &'a A: IntoIpv4String,
+    {
         let msg_id = msg.id;
         let notify = Arc::new(Notify::new());
 
@@ -114,7 +123,7 @@ impl Client {
         let serialized = msg.serialize();
 
         for _ in 0..5 {
-            let _ = self.send_to(&serialized, dest).await;
+            let _ = self.send_to(&serialized, &dest).await;
             // Wait for ack or timeout
             let notified =
                 tokio::time::timeout(Duration::from_millis(250), notify.notified()).await;
@@ -135,16 +144,42 @@ impl Client {
         ))
     }
 
-    pub async fn send_to_broadcast_reliable(&self, msg: Packet) -> std::io::Result<()> {
-        for i in 2..=50 {
-            let ip = format!("{}{}", INTERFACE, i);
-            if ip == self.my_ip {
-                continue;
-            }
-            let addr = format!("{}:{}", ip, PORT);
-            let _ = self.send_reliable(msg.clone(), &addr).await;
+    pub async fn send_multicast_reliable<A>(
+        self: Arc<Self>,
+        msg: Packet,
+        addrs: Vec<A>,
+    ) -> std::io::Result<()>
+    where
+        for<'a> &'a A: IntoIpv4String,
+        A: std::marker::Send + std::marker::Sync + 'static,
+    {
+        let mut tasks = Vec::new();
+
+        for addr in addrs {
+            let msg_clone = msg.clone_with_new_id();
+            let client = self.clone();
+
+            // Spawn the send_reliable call as a future
+            let task = tokio::spawn(async move { client.send_reliable(msg_clone, addr).await });
+
+            tasks.push(task);
         }
-        Ok(())
+
+        // Wait for all tasks to complete
+        let results = join_all(tasks).await;
+
+        // Check if any task failed or any send_reliable returned Err
+        if results
+            .iter()
+            .any(|res| res.is_err() || res.as_ref().unwrap().is_err())
+        {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Some sends were unsuccessful",
+            ))
+        } else {
+            Ok(())
+        }
     }
 
     pub async fn recv_from(
