@@ -16,7 +16,7 @@ use std::collections::VecDeque;
 use std::io::{self};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio::time::{Duration, Instant, timeout};
+use tokio::time::{Duration, Instant};
 pub use utils::ip::{IntoIpv4Bytes, IntoIpv4String}; // Re-export for top-level access
 
 mod client;
@@ -65,6 +65,62 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut messages: VecDeque<String> = VecDeque::with_capacity(MESSAGE_CAPACITY);
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<UiEvent>();
+
+    // Task 1: Packet listener
+    let client_listener = client.clone();
+    let tx_listener = tx.clone();
+    let known_peers_listener = known_peers.clone();
+    tokio::spawn(async move {
+        let mut buf = [0u8; 512];
+        loop {
+            if let Ok((n, src)) = client_listener.recv_from(&mut buf).await {
+                let msg: Packet<String> = Packet::deserialize(&buf[..n]);
+                match msg.type_ {
+                    PacketType::Discovery => {
+                        let newly_added = {
+                            // In a block to drop the lock before sending messages
+                            let now = Instant::now();
+                            let mut peers = known_peers_listener.lock().await;
+                            let is_new = !peers.contains_key(&msg.source);
+                            peers.insert(msg.source, now);
+                            is_new
+                        };
+                        if newly_added {
+                            push_message!(
+                                tx_listener,
+                                format!(
+                                    "Discovered peer: {}",
+                                    msg.source
+                                        .iter()
+                                        .map(|b| b.to_string())
+                                        .collect::<Vec<String>>()
+                                        .join(".")
+                                )
+                            );
+                        }
+                    }
+                    PacketType::Request => {
+                        let _ = client_listener.send_ack(&msg, &msg.source).await;
+                        if !client_listener.should_process(src.ip(), msg.id) {
+                            continue;
+                        }
+
+                        let content = msg.data.unwrap_or_else(|| "No data".into());
+                        push_message!(tx_listener, format!("<{}> {}", src.ip(), content));
+                    }
+                    PacketType::Acknowledgment => client_listener.acknowledge(msg.id),
+                    PacketType::Error => {
+                        push_error!(
+                            tx_listener,
+                            format!("Error message from {}: {:?}", src, msg)
+                        )
+                    }
+                }
+            }
+        }
+    });
+
+    // Task 2: UI event loop
     let mut input = String::new();
     let mut target_index: isize = -1; // -1 means broadcast
     let mut scroll_offset: u16 = 0;
@@ -74,53 +130,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
 
-    // Listen for incoming packets
-    let mut buf = [0u8; 512];
     loop {
-        // ! Update: Use non-blocking recv_from
-        while let Ok(Ok((n, src))) =
-            timeout(Duration::from_millis(1), client.recv_from(&mut buf)).await
-        {
-            let msg: Packet<String> = Packet::deserialize(&buf[..n]);
-            match msg.type_ {
-                PacketType::Discovery => {
-                    let newly_added = {
-                        // In a block to drop the lock before sending messages
-                        let now = Instant::now();
-                        let mut peers = known_peers.lock().await;
-                        let is_new = !peers.contains_key(&msg.source);
-                        peers.insert(msg.source, now);
-                        is_new
-                    };
-                    if newly_added {
-                        push_message!(
-                            tx,
-                            format!(
-                                "Discovered peer: {}",
-                                msg.source
-                                    .iter()
-                                    .map(|b| b.to_string())
-                                    .collect::<Vec<String>>()
-                                    .join(".")
-                            )
-                        );
-                    }
-                }
-                PacketType::Request => {
-                    let _ = client.send_ack(&msg, &msg.source).await;
-                    if !client.should_process(src.ip(), msg.id) {
-                        continue;
-                    }
-
-                    let content = msg.data.unwrap_or_else(|| "No data".into());
-                    push_message!(tx, format!("<{}> {}", src.ip(), content));
-                }
-                PacketType::Acknowledgment => client.acknowledge(msg.id),
-                PacketType::Error => {
-                    push_error!(tx, format!("Error message from {}: {:?}", src, msg))
-                }
-            }
-        }
+        let start_time = Instant::now();
 
         // Handle input
         if event::poll(std::time::Duration::from_millis(0)).unwrap() {
@@ -288,6 +299,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .scroll((scroll_offset, 0));
             f.render_widget(messages_block, chunks[1]);
         })?;
+
+        // Limit the loop to 60 FPS
+        let elapsed = start_time.elapsed();
+        if elapsed < Duration::from_millis(16) {
+            tokio::time::sleep(Duration::from_millis(16) - elapsed).await;
+        }
     }
 
     terminal.show_cursor()?;
