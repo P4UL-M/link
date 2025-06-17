@@ -13,7 +13,7 @@ use uuid::Uuid;
 const PORT: u16 = 34254;
 const INTERFACE: &str = "10.10.0.";
 
-const DROPOUT_TEST_RATIO: f32 = 0.8; // 70% chance of packet loss
+const DROPOUT_TEST_RATIO: f32 = 0.7; // 70% chance of packet loss
 const DROP_DELAY_MS: u64 = 10; // Delay for dropout test
 
 pub struct Client {
@@ -87,11 +87,7 @@ impl Client {
         }
         // Utilisation du trait pour obtenir la chaîne d'adresse
         let addr_str = addr.into_ipv4_string();
-        let addr = if addr_str.contains(':') {
-            addr_str
-        } else {
-            format!("{}:{}", addr_str, PORT)
-        };
+        let addr = format!("{}:{}", addr_str, PORT);
         // Check if the address is valid
         let addr: std::net::SocketAddr = addr.parse().expect("Invalid address format");
         self.socket.send_to(msg, addr).await
@@ -99,11 +95,10 @@ impl Client {
 
     pub async fn send_to_broadcast(&self, msg: &[u8]) {
         for i in 2..=50 {
-            let ip = format!("{}{}", INTERFACE, i);
-            if ip == self.my_ip {
+            let addr = format!("{}{}", INTERFACE, i);
+            if addr == self.my_ip {
                 continue;
             }
-            let addr = format!("{}:{}", ip, PORT);
             let _ = self.send_to(msg, addr).await;
         }
     }
@@ -216,7 +211,10 @@ impl Client {
         }
     }
 
-    pub async fn send_ack(&self, msg: &Packet, src: &str) {
+    pub async fn send_ack<A>(&self, msg: &Packet, src: &A)
+    where
+        for<'a> &'a A: IntoIpv4String,
+    {
         let ack_msg = Packet::new_with_id(
             msg.id,
             PacketType::Acknowledgment,
