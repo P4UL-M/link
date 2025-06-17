@@ -4,6 +4,7 @@ use crossterm::{
     event::{self, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode},
 };
+use indexmap::IndexMap;
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
@@ -14,7 +15,7 @@ use std::collections::VecDeque;
 use std::io::{self};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio::time::{Duration, timeout};
+use tokio::time::{Duration, Instant, timeout};
 
 mod client;
 mod packet;
@@ -28,7 +29,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     client.clone().discover().await?;
     println!("Client started with IP: {}", client.my_ip);
 
-    let known_peers: Arc<Mutex<Vec<[u8; 4]>>> = Arc::new(Mutex::new(Vec::new()));
+    let known_peers: Arc<Mutex<IndexMap<[u8; 4], Instant>>> = Arc::new(Mutex::new(IndexMap::new()));
+    // Periodically clean up old peers in the background
+    let cleanup_peers = known_peers.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let now = Instant::now();
+            let mut peers = cleanup_peers.lock().await;
+            peers.retain(|_, last_seen| now.duration_since(*last_seen) < Duration::from_secs(5));
+        }
+    });
 
     let mut messages: VecDeque<String> = VecDeque::with_capacity(10);
     let mut input = String::new();
@@ -49,9 +60,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let msg = Packet::deserialize(&buf[..n]);
             match msg.type_ {
                 PacketType::Discovery => {
-                    let mut peers = known_peers.lock().await;
-                    if !peers.contains(&msg.source) {
-                        peers.push(msg.source);
+                    let newly_added = {
+                        // In a block to drop the lock before sending messages
+                        let now = Instant::now();
+                        let mut peers = known_peers.lock().await;
+                        let is_new = !peers.contains_key(&msg.source);
+                        peers.insert(msg.source, now);
+                        is_new
+                    };
+                    if newly_added {
                         messages.push_back(format!(
                             "Discovered peer: {}",
                             msg.source
@@ -102,10 +119,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if target_index == -1 || target_index as usize >= peers.len() {
                                 None
                             } else {
-                                Some(peers[target_index as usize])
+                                Some(
+                                    peers
+                                        .get_index(target_index as usize)
+                                        .map(|(ip, _)| ip.clone())
+                                        .expect("Invalid index"),
+                                )
                             }
                         };
-
                         let client = client.clone();
                         if let Some(ip) = target {
                             let msg = Packet::new(
@@ -138,7 +159,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             });
                         }
-
                         input.clear();
                     }
                     KeyCode::Tab => {
@@ -176,11 +196,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if target_index == -1 || target_index as usize >= peers.len() {
                     "broadcast".to_string()
                 } else {
-                    peers[target_index as usize]
-                        .iter()
-                        .map(|b| b.to_string())
-                        .collect::<Vec<_>>()
-                        .join(".")
+                    peers
+                        .get_index(target_index as usize)
+                        .map(|(ip, _)| {
+                            ip.iter()
+                                .map(|b| b.to_string())
+                                .collect::<Vec<_>>()
+                                .join(".")
+                        })
+                        .unwrap_or_else(|| "unknown".to_string())
                 }
             };
 
