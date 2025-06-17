@@ -1,6 +1,5 @@
 use rand;
 use std::collections::HashMap;
-use std::io::{Write, stdout};
 use std::net::UdpSocket;
 use std::sync::{Arc, Mutex};
 use std::thread;

@@ -1,5 +1,6 @@
-use crate::packet::{Packet, PacketType, Serializable};
+use crate::packet::{Packet, PacketType};
 use crate::utils::ip::IntoIpv4String;
+use crate::utils::traits::Serializable;
 use futures::future::join_all;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -56,7 +57,7 @@ impl Client {
             let client = self.clone(); // Clone Arc for the task
             async move {
                 loop {
-                    let msg = Packet::new(
+                    let msg: Packet<String> = Packet::new(
                         PacketType::Discovery,
                         client.my_ip.as_str(),
                         "255.255.255.255",
@@ -103,7 +104,11 @@ impl Client {
         }
     }
 
-    pub async fn send_reliable<A>(&self, msg: Packet, dest: A) -> std::io::Result<()>
+    pub async fn send_reliable<A, S: Serializable + Clone>(
+        &self,
+        msg: Packet<S>,
+        dest: A,
+    ) -> std::io::Result<()>
     where
         for<'a> &'a A: IntoIpv4String,
     {
@@ -139,14 +144,15 @@ impl Client {
         ))
     }
 
-    pub async fn send_multicast_reliable<A>(
+    pub async fn send_multicast_reliable<A, S: Serializable + Clone>(
         self: Arc<Self>,
-        msg: Packet,
+        msg: Packet<S>,
         addrs: Vec<A>,
     ) -> std::io::Result<()>
     where
         for<'a> &'a A: IntoIpv4String,
         A: std::marker::Send + std::marker::Sync + 'static,
+        S: std::marker::Send + std::marker::Sync + 'static,
     {
         let mut tasks = Vec::new();
 
@@ -211,11 +217,12 @@ impl Client {
         }
     }
 
-    pub async fn send_ack<A>(&self, msg: &Packet, src: &A)
+    pub async fn send_ack<A, S>(&self, msg: &Packet<S>, src: &A)
     where
         for<'a> &'a A: IntoIpv4String,
+        S: Serializable + Clone,
     {
-        let ack_msg = Packet::new_with_id(
+        let ack_msg: Packet<String> = Packet::new_with_id(
             msg.id,
             PacketType::Acknowledgment,
             self.my_ip.as_str(),

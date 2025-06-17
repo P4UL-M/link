@@ -1,4 +1,5 @@
 use crate::IntoIpv4Bytes;
+use crate::utils::traits::Serializable;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PacketType {
@@ -8,48 +9,43 @@ pub enum PacketType {
     Error,
 }
 
-pub struct Packet {
+pub struct Packet<S: Serializable> {
     pub(crate) id: uuid::Uuid,
     pub type_: PacketType,
     pub source: [u8; 4],      // Using a fixed-size array for source IPv4
     pub destination: [u8; 4], // Using a fixed-size array for destination IPv4
-    pub data: Option<Vec<u8>>,
+    pub data: Option<S>,
 }
 
-pub trait Serializable {
-    fn serialize(&self) -> Vec<u8>;
-    fn deserialize(data: &[u8]) -> Self;
-}
-
-impl Packet {
-    pub fn new<S: IntoIpv4Bytes, D: IntoIpv4Bytes>(
+impl<S: Serializable + Clone> Packet<S> {
+    pub fn new<I: IntoIpv4Bytes, D: IntoIpv4Bytes>(
         type_: PacketType,
-        source: S,
+        source: I,
         destination: D,
-        data: Option<&[u8]>,
+        data: Option<S>,
     ) -> Self {
         Packet {
             id: uuid::Uuid::new_v4(),
             type_,
             source: source.into_ipv4(),
             destination: destination.into_ipv4(),
-            data: data.map(|d| d.to_vec()),
+            data: data,
         }
     }
 
-    pub fn new_with_id<S: IntoIpv4Bytes, D: IntoIpv4Bytes>(
+    pub fn new_with_id<I: IntoIpv4Bytes, D: IntoIpv4Bytes>(
         id: uuid::Uuid,
         type_: PacketType,
-        source: S,
+        source: I,
         destination: D,
-        data: Option<&[u8]>,
+        data: Option<S>,
     ) -> Self {
         Packet {
             id,
             type_,
             source: source.into_ipv4(),
             destination: destination.into_ipv4(),
-            data: data.map(|d| d.to_vec()),
+            data: data,
         }
     }
 
@@ -64,7 +60,7 @@ impl Packet {
     }
 }
 
-impl Serializable for Packet {
+impl<S: Serializable + Clone> Serializable for Packet<S> {
     fn serialize(&self) -> Vec<u8> {
         let mut serialized = Vec::new();
         serialized.extend_from_slice(&self.id.to_bytes_le()); // 16 bytes for UUID
@@ -72,7 +68,7 @@ impl Serializable for Packet {
         serialized.extend_from_slice(&self.source); // 4 bytes for source IP
         serialized.extend_from_slice(&self.destination); // 4 bytes for destination IP
         if let Some(ref data) = self.data {
-            serialized.extend_from_slice(data);
+            serialized.extend_from_slice(data.serialize().as_slice());
         }
         serialized
     }
@@ -108,7 +104,7 @@ impl Serializable for Packet {
             .expect("Failed to parse destination IP");
 
         let data = if let Some(d) = data.get(25..) {
-            Some(d.to_vec())
+            Some(S::deserialize(d.as_ref()))
         } else {
             None
         };
@@ -118,12 +114,12 @@ impl Serializable for Packet {
             type_,
             source,
             destination,
-            data,
+            data: data,
         }
     }
 }
 
-impl std::fmt::Debug for Packet {
+impl<S: Serializable + Clone + std::fmt::Debug> std::fmt::Debug for Packet<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Message")
             .field("type", &self.type_)
@@ -134,7 +130,7 @@ impl std::fmt::Debug for Packet {
     }
 }
 
-impl std::fmt::Display for Packet {
+impl<S: Serializable + Clone + std::fmt::Debug> std::fmt::Display for Packet<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let source_ip = format!(
             "{}.{}.{}.{}",
@@ -152,7 +148,7 @@ impl std::fmt::Display for Packet {
     }
 }
 
-impl Clone for Packet {
+impl<S: Serializable + Clone> Clone for Packet<S> {
     fn clone(&self) -> Self {
         Packet {
             id: self.id,
@@ -164,7 +160,7 @@ impl Clone for Packet {
     }
 }
 
-impl Into<Vec<u8>> for Packet {
+impl<S: Serializable + Clone> Into<Vec<u8>> for Packet<S> {
     fn into(self) -> Vec<u8> {
         self.serialize()
     }

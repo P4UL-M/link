@@ -1,5 +1,6 @@
 use crate::client::Client;
-use crate::packet::{Packet, PacketType, Serializable};
+use crate::packet::{Packet, PacketType};
+use crate::utils::traits::Serializable;
 use crossterm::{
     event::{self, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode},
@@ -16,11 +17,12 @@ use std::io::{self};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::{Duration, Instant, timeout};
+pub use utils::ip::{IntoIpv4Bytes, IntoIpv4String}; // Re-export for top-level access
 
 mod client;
+mod message;
 mod packet;
 pub mod utils; // or pub mod ip;
-pub use utils::ip::{IntoIpv4Bytes, IntoIpv4String}; // Re-export for top-level access
 
 const MESSAGE_CAPACITY: usize = 50; // Maximum number of messages to keep in the UI
 
@@ -79,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         while let Ok(Ok((n, src))) =
             timeout(Duration::from_millis(1), client.recv_from(&mut buf)).await
         {
-            let msg = Packet::deserialize(&buf[..n]);
+            let msg: Packet<String> = Packet::deserialize(&buf[..n]);
             match msg.type_ {
                 PacketType::Discovery => {
                     let newly_added = {
@@ -110,11 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         continue;
                     }
 
-                    let content = msg
-                        .data
-                        .as_ref()
-                        .map(|d| String::from_utf8_lossy(d).to_string())
-                        .unwrap_or_else(|| "No data".into());
+                    let content = msg.data.unwrap_or_else(|| "No data".into());
                     push_message!(tx, format!("<{}> {}", src.ip(), content));
                 }
                 PacketType::Acknowledgment => client.acknowledge(msg.id),
@@ -159,7 +157,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 PacketType::Request,
                                 client.my_ip.as_str(),
                                 ip,
-                                Some(input.as_bytes()),
+                                Some(input.clone()),
                             );
                             let target_str = ip
                                 .iter()
@@ -180,7 +178,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 PacketType::Request,
                                 client.my_ip.as_str(),
                                 [255, 255, 255, 255], // Broadcast
-                                Some(input.as_bytes()),
+                                Some(input.clone()),
                             );
                             let peers = known_peers.lock().await;
                             let peers = peers.keys().cloned().collect::<Vec<_>>();
