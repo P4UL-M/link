@@ -1,16 +1,16 @@
 use crate::IntoIpv4Bytes;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum MessageType {
+pub enum PacketType {
     Request,
     Acknowledgment,
     Discovery,
     Error,
 }
 
-pub struct Message {
+pub struct Packet {
     pub(crate) id: uuid::Uuid,
-    pub type_: MessageType,
+    pub type_: PacketType,
     pub source: [u8; 4],      // Using a fixed-size array for source IPv4
     pub destination: [u8; 4], // Using a fixed-size array for destination IPv4
     pub data: Option<Vec<u8>>,
@@ -21,14 +21,14 @@ pub trait Serializable {
     fn deserialize(data: &[u8]) -> Self;
 }
 
-impl Message {
+impl Packet {
     pub fn new<S: IntoIpv4Bytes, D: IntoIpv4Bytes>(
-        type_: MessageType,
+        type_: PacketType,
         source: S,
         destination: D,
         data: Option<&[u8]>,
     ) -> Self {
-        Message {
+        Packet {
             id: uuid::Uuid::new_v4(),
             type_,
             source: source.into_ipv4(),
@@ -39,12 +39,12 @@ impl Message {
 
     pub fn new_with_id<S: IntoIpv4Bytes, D: IntoIpv4Bytes>(
         id: uuid::Uuid,
-        type_: MessageType,
+        type_: PacketType,
         source: S,
         destination: D,
         data: Option<&[u8]>,
     ) -> Self {
-        Message {
+        Packet {
             id,
             type_,
             source: source.into_ipv4(),
@@ -54,7 +54,7 @@ impl Message {
     }
 }
 
-impl Serializable for Message {
+impl Serializable for Packet {
     fn serialize(&self) -> Vec<u8> {
         let mut serialized = Vec::new();
         serialized.extend_from_slice(&self.id.to_bytes_le()); // 16 bytes for UUID
@@ -85,10 +85,10 @@ impl Serializable for Message {
         );
 
         let type_ = match data[16] {
-            0 => MessageType::Request,
-            1 => MessageType::Acknowledgment,
-            2 => MessageType::Discovery,
-            3 => MessageType::Error,
+            0 => PacketType::Request,
+            1 => PacketType::Acknowledgment,
+            2 => PacketType::Discovery,
+            3 => PacketType::Error,
             _ => panic!("Unknown message type"),
         };
 
@@ -103,7 +103,7 @@ impl Serializable for Message {
             None
         };
 
-        Message {
+        Packet {
             id,
             type_,
             source,
@@ -113,7 +113,7 @@ impl Serializable for Message {
     }
 }
 
-impl std::fmt::Debug for Message {
+impl std::fmt::Debug for Packet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Message")
             .field("type", &self.type_)
@@ -124,7 +124,7 @@ impl std::fmt::Debug for Message {
     }
 }
 
-impl std::fmt::Display for Message {
+impl std::fmt::Display for Packet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let source_ip = format!(
             "{}.{}.{}.{}",
@@ -142,9 +142,9 @@ impl std::fmt::Display for Message {
     }
 }
 
-impl Clone for Message {
+impl Clone for Packet {
     fn clone(&self) -> Self {
-        Message {
+        Packet {
             id: self.id,
             type_: self.type_,
             source: self.source,
@@ -154,7 +154,7 @@ impl Clone for Message {
     }
 }
 
-impl Into<Vec<u8>> for Message {
+impl Into<Vec<u8>> for Packet {
     fn into(self) -> Vec<u8> {
         self.serialize()
     }

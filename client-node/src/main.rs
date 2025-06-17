@@ -1,91 +1,204 @@
-use crate::message::{Message, MessageType, Serializable};
+use crate::client::Client;
+use crate::packet::{Packet, PacketType, Serializable};
+use crossterm::{
+    event::{self, Event, KeyCode},
+    terminal::{disable_raw_mode, enable_raw_mode},
+};
+use ratatui::{
+    Terminal,
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout},
+    widgets::{Block, Borders, Paragraph},
+};
+use std::collections::VecDeque;
+use std::io::{self};
 use std::sync::Arc;
+use tokio::sync::Mutex;
+use tokio::time::{Duration, timeout};
 
 mod client;
-mod message;
+mod packet;
 pub mod utils; // or pub mod ip;
 pub use utils::ip::IntoIpv4Bytes; // Re-export for top-level access
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Auto-pick a free IP from 10.10.0.2 to 10.10.0.254
-    let client = client::Client::new();
-    client.discover()?;
+    let client = Arc::new(Client::new().await);
+    client.clone().discover().await?;
     println!("Client started with IP: {}", client.my_ip);
 
-    let known_peers: std::sync::Mutex<Vec<[u8; 4]>> = std::sync::Mutex::new(Vec::new());
+    let known_peers: Arc<Mutex<Vec<[u8; 4]>>> = Arc::new(Mutex::new(Vec::new()));
+
+    let mut messages: VecDeque<String> = VecDeque::with_capacity(10);
+    let mut input = String::new();
+    let mut target_index: isize = -1; // -1 means broadcast
+    enable_raw_mode().unwrap();
+    let stdout = io::stdout();
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+    terminal.clear()?;
 
     // Listen for incoming packets
     let mut buf = [0u8; 512];
-    let client = Arc::new(client);
     loop {
-        match client.recv_from(&mut buf) {
-            Ok((n, src)) => {
-                let msg = Message::deserialize(&buf[..n]);
-                // if discovery message, add to known peers
-                match msg.type_ {
-                    MessageType::Discovery => {
-                        let mut peers = known_peers.lock().unwrap();
-                        if !peers.contains(&msg.source) {
-                            peers.push(msg.source);
-                            println!(
-                                "Discovered peer: {} from {}",
-                                msg.source
-                                    .iter()
-                                    .map(|b| b.to_string())
-                                    .collect::<Vec<String>>()
-                                    .join("."),
-                                src.ip()
-                            );
-                            // Send request to the discovered peer with hello message
-                            let hello_msg = Message::new(
-                                MessageType::Request,
+        // ! Update: Use non-blocking recv_from
+        while let Ok(Ok((n, src))) =
+            timeout(Duration::from_millis(1), client.recv_from(&mut buf)).await
+        {
+            let msg = Packet::deserialize(&buf[..n]);
+            match msg.type_ {
+                PacketType::Discovery => {
+                    let mut peers = known_peers.lock().await;
+                    if !peers.contains(&msg.source) {
+                        peers.push(msg.source);
+                        messages.push_back(format!(
+                            "Discovered peer: {}",
+                            msg.source
+                                .iter()
+                                .map(|b| b.to_string())
+                                .collect::<Vec<String>>()
+                                .join(".")
+                        ));
+                        if messages.len() > 10 {
+                            messages.pop_front();
+                        }
+                    }
+                }
+                PacketType::Request => {
+                    let _ = client.send_ack(&msg, &src.to_string()).await;
+                    if !client.should_process(src.ip(), msg.id) {
+                        continue;
+                    }
+
+                    let content = msg
+                        .data
+                        .as_ref()
+                        .map(|d| String::from_utf8_lossy(d).to_string())
+                        .unwrap_or_else(|| "No data".into());
+                    messages.push_back(format!("From {}: {}", src.ip(), content));
+                    if messages.len() > 10 {
+                        messages.pop_front();
+                    }
+                }
+                PacketType::Acknowledgment => client.acknowledge(msg.id),
+                PacketType::Error => eprintln!("Error message from {}: {:?}", src, msg),
+            }
+        }
+
+        // Handle input
+        if event::poll(std::time::Duration::from_millis(0)).unwrap() {
+            if let Event::Key(key_event) = event::read().unwrap() {
+                match key_event.code {
+                    KeyCode::Char(c) => {
+                        input.push(c);
+                    }
+                    KeyCode::Backspace => {
+                        input.pop();
+                    }
+                    KeyCode::Enter => {
+                        let target = {
+                            let peers = known_peers.lock().await;
+                            if target_index == -1 || target_index as usize >= peers.len() {
+                                None
+                            } else {
+                                Some(peers[target_index as usize])
+                            }
+                        };
+
+                        let client = client.clone();
+                        if let Some(ip) = target {
+                            let msg = Packet::new(
+                                PacketType::Request,
                                 client.my_ip.as_str(),
-                                msg.source,
-                                Some(
-                                    format!(
-                                        "Hello from client {}!",
-                                        client.my_ip.split('.').collect::<Vec<&str>>()[3]
-                                    )
-                                    .as_bytes(),
-                                ),
+                                ip,
+                                Some(input.as_bytes()),
                             );
-                            let client = client.clone();
+                            let target_str = ip
+                                .iter()
+                                .map(|b| b.to_string())
+                                .collect::<Vec<_>>()
+                                .join(".");
+
                             tokio::spawn(async move {
-                                match client.send_reliable(hello_msg, &src.to_string()).await {
-                                    Ok(_) => (),
-                                    Err(e) => eprintln!("Failed to send request: {}", e),
+                                if let Err(e) = client.send_reliable(msg, &target_str).await {
+                                    eprintln!("Send failed: {}", e);
+                                }
+                            });
+                        } else {
+                            let msg = Packet::new(
+                                PacketType::Request,
+                                client.my_ip.as_str(),
+                                [255, 255, 255, 255], // Broadcast
+                                Some(input.as_bytes()),
+                            );
+                            tokio::spawn(async move {
+                                if let Err(e) = client.send_to_broadcast_reliable(msg).await {
+                                    eprintln!("Send failed: {}", e);
                                 }
                             });
                         }
-                    }
-                    MessageType::Request => {
-                        // ! Think if acknowledgment should be sent before of after duplicate check
-                        client.send_ack(&msg, &src.to_string());
 
-                        if !client.should_process(src.ip(), msg.id) {
-                            continue;
+                        input.clear();
+                    }
+                    KeyCode::Tab => {
+                        let peers = known_peers.lock().await;
+                        if peers.is_empty() {
+                            target_index = -1;
+                        } else {
+                            target_index = ((target_index + 2) % ((peers.len() + 1) as isize)) - 1;
                         }
-
-                        // Process the request message
-                        println!(
-                            "Received message from {}: {}",
-                            src.ip(),
-                            msg.data
-                                .as_ref()
-                                .map(|d| String::from_utf8_lossy(d))
-                                .unwrap_or_else(|| "No data".into())
-                        );
                     }
-                    MessageType::Acknowledgment => {
-                        client.acknowledge(msg.id);
+                    KeyCode::Esc => {
+                        break;
                     }
-                    MessageType::Error => {
-                        eprintln!("Error message from {}: {:?}", src, msg);
-                    }
+                    _ => {}
                 }
             }
-            Err(e) => eprintln!("recv error: {}", e),
         }
+
+        let peers_snapshot = {
+            let peers = known_peers.lock().await;
+            peers.clone()
+        };
+
+        // Draw UI with ratatui
+        terminal.draw(|f| {
+            let size = f.area();
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .margin(1)
+                .constraints([Constraint::Length(3), Constraint::Min(1)].as_ref())
+                .split(size);
+
+            let target_str = {
+                let peers = peers_snapshot;
+                if target_index == -1 || target_index as usize >= peers.len() {
+                    "broadcast".to_string()
+                } else {
+                    peers[target_index as usize]
+                        .iter()
+                        .map(|b| b.to_string())
+                        .collect::<Vec<_>>()
+                        .join(".")
+                }
+            };
+
+            let input_block = Paragraph::new(input.as_str()).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(format!("[{}]>", target_str)),
+            );
+            f.render_widget(input_block, chunks[0]);
+
+            let msgs: String = messages.iter().cloned().collect::<Vec<_>>().join("\n");
+            let messages_block = Paragraph::new(msgs.as_str())
+                .block(Block::default().borders(Borders::ALL).title("Messages"));
+            f.render_widget(messages_block, chunks[1]);
+        })?;
     }
+
+    terminal.show_cursor()?;
+    disable_raw_mode().unwrap();
+    Ok(())
 }

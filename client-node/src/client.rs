@@ -1,19 +1,18 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::IpAddr;
-use std::net::UdpSocket;
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::{Duration, Instant};
+use tokio::net::UdpSocket;
 use tokio::sync::Notify;
 use uuid::Uuid;
 
-use crate::message::{Message, MessageType, Serializable};
+use crate::packet::{Packet, PacketType, Serializable};
 
 const PORT: u16 = 34254;
 const INTERFACE: &str = "10.10.0.";
 
-const DROPOUT_TEST_RATIO: f32 = 0.5f32; // 50% chance of packet loss
+const DROPOUT_TEST_RATIO: f32 = 0.7; // 70% chance of packet loss
 
 pub struct Client {
     socket: UdpSocket,
@@ -23,12 +22,12 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new() -> Self {
+    pub async fn new() -> Self {
         let mut my_ip = None;
         for i in 2..=50 {
             let test_ip = format!("{}{}", INTERFACE, i);
             let bind_addr = format!("{}:{}", test_ip, PORT);
-            if UdpSocket::bind(&bind_addr).is_ok() {
+            if UdpSocket::bind(&bind_addr).await.is_ok() {
                 my_ip = Some(test_ip);
                 break;
             }
@@ -36,7 +35,9 @@ impl Client {
         let my_ip = my_ip.expect("Failed to find a free IP address in the range");
         let bind_addr = format!("{}:{}", my_ip, PORT);
 
-        let socket = UdpSocket::bind(&bind_addr).expect("Failed to bind UDP socket");
+        let socket = UdpSocket::bind(&bind_addr)
+            .await
+            .expect("Failed to bind UDP socket");
         socket.set_broadcast(true).expect("Could not set broadcast");
 
         Client {
@@ -47,47 +48,61 @@ impl Client {
         }
     }
 
-    pub fn discover(&self) -> std::io::Result<()> {
+    pub async fn discover(self: Arc<Self>) -> std::io::Result<()> {
         // Periodically send discovery packets
-        thread::spawn({
-            let client = self.try_clone()?;
-            move || loop {
-                let msg = Message::new(
-                    MessageType::Discovery,
-                    client.my_ip.as_str(),
-                    "255.255.255.255",
-                    None,
-                );
-                client.send_to_broadcast(&msg.serialize());
-                thread::sleep(Duration::from_secs(2));
+        tokio::spawn({
+            let client = self.clone(); // Clone Arc for the task
+            async move {
+                loop {
+                    let msg = Packet::new(
+                        PacketType::Discovery,
+                        client.my_ip.as_str(),
+                        "255.255.255.255",
+                        None,
+                    );
+                    client.send_to_broadcast(&msg.serialize()).await;
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
             }
         });
         Ok(())
     }
 
-    pub fn send_to(&self, msg: &[u8], addr: &str) -> std::io::Result<usize> {
+    pub async fn send_to(&self, msg: &[u8], addr: &str) -> std::io::Result<usize> {
         // Simulate packet loss for dropout test only on request messages
-        if rand::random::<f32>() < DROPOUT_TEST_RATIO && msg[16].eq(&(MessageType::Request as u8)) {
+        if rand::random::<f32>() < DROPOUT_TEST_RATIO && msg[16].eq(&(PacketType::Request as u8)) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 "Simulated packet loss",
             ));
         }
-        self.socket.send_to(msg, addr)
+        // Simulate a delay for dropout test
+        if rand::random::<f32>() < DROPOUT_TEST_RATIO && msg[16].eq(&(PacketType::Request as u8)) {
+            tokio::time::sleep(Duration::from_millis(200 + rand::random::<u64>() % 800)).await;
+        }
+        // if port is not specified, use the default port
+        let addr = if addr.contains(':') {
+            addr.to_string()
+        } else {
+            format!("{}:{}", addr, PORT)
+        };
+        // Check if the address is valid
+        let addr: std::net::SocketAddr = addr.parse().expect("Invalid address format");
+        self.socket.send_to(msg, addr).await
     }
 
-    pub fn send_to_broadcast(&self, msg: &[u8]) {
+    pub async fn send_to_broadcast(&self, msg: &[u8]) {
         for i in 2..=50 {
             let ip = format!("{}{}", INTERFACE, i);
             if ip == self.my_ip {
                 continue;
             }
             let addr = format!("{}:{}", ip, PORT);
-            let _ = self.send_to(msg, &addr);
+            let _ = self.send_to(msg, &addr).await;
         }
     }
 
-    pub async fn send_reliable(&self, msg: Message, dest: &str) -> std::io::Result<()> {
+    pub async fn send_reliable(&self, msg: Packet, dest: &str) -> std::io::Result<()> {
         let msg_id = msg.id;
         let notify = Arc::new(Notify::new());
 
@@ -99,7 +114,7 @@ impl Client {
         let serialized = msg.serialize();
 
         for _ in 0..5 {
-            let _ = self.send_to(&serialized, dest);
+            let _ = self.send_to(&serialized, dest).await;
             // Wait for ack or timeout
             let notified =
                 tokio::time::timeout(Duration::from_millis(250), notify.notified()).await;
@@ -120,17 +135,23 @@ impl Client {
         ))
     }
 
-    pub fn try_clone(&self) -> std::io::Result<Client> {
-        Ok(Client {
-            socket: self.socket.try_clone()?,
-            my_ip: self.my_ip.clone(),
-            pending_acks: Arc::clone(&self.pending_acks),
-            seen_messages: Arc::clone(&self.seen_messages),
-        })
+    pub async fn send_to_broadcast_reliable(&self, msg: Packet) -> std::io::Result<()> {
+        for i in 2..=50 {
+            let ip = format!("{}{}", INTERFACE, i);
+            if ip == self.my_ip {
+                continue;
+            }
+            let addr = format!("{}:{}", ip, PORT);
+            let _ = self.send_reliable(msg.clone(), &addr).await;
+        }
+        Ok(())
     }
 
-    pub fn recv_from(&self, buf: &mut [u8]) -> std::io::Result<(usize, std::net::SocketAddr)> {
-        self.socket.recv_from(buf)
+    pub async fn recv_from(
+        &self,
+        buf: &mut [u8],
+    ) -> std::io::Result<(usize, std::net::SocketAddr)> {
+        self.socket.recv_from(buf).await
     }
 
     pub fn should_process(&self, src_ip: IpAddr, msg_id: Uuid) -> bool {
@@ -160,14 +181,14 @@ impl Client {
         }
     }
 
-    pub fn send_ack(&self, msg: &Message, src: &str) {
-        let ack_msg = Message::new_with_id(
+    pub async fn send_ack(&self, msg: &Packet, src: &str) {
+        let ack_msg = Packet::new_with_id(
             msg.id,
-            MessageType::Acknowledgment,
+            PacketType::Acknowledgment,
             self.my_ip.as_str(),
             msg.source,
             None,
         );
-        let _ = self.send_to(&ack_msg.serialize(), src);
+        let _ = self.send_to(&ack_msg.serialize(), src).await;
     }
 }
