@@ -115,7 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .as_ref()
                         .map(|d| String::from_utf8_lossy(d).to_string())
                         .unwrap_or_else(|| "No data".into());
-                    push_message!(tx, format!("{}> {}", src.ip(), content));
+                    push_message!(tx, format!("<{}> {}", src.ip(), content));
                 }
                 PacketType::Acknowledgment => client.acknowledge(msg.id),
                 PacketType::Error => {
@@ -166,6 +166,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 .map(|b| b.to_string())
                                 .collect::<Vec<_>>()
                                 .join(".");
+                            push_message!(tx, format!("[{}] {}", target_str, input.clone()));
                             tokio::spawn(async move {
                                 if let Err(e) = client.send_reliable(msg, ip).await {
                                     push_error!(
@@ -183,6 +184,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             );
                             let peers = known_peers.lock().await;
                             let peers = peers.keys().cloned().collect::<Vec<_>>();
+                            push_message!(tx, format!("[broadcast] {}", input.clone()));
                             tokio::spawn(async move {
                                 if let Err(e) = client.send_multicast_reliable(msg, peers).await {
                                     push_error!(
