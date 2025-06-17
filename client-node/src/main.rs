@@ -22,6 +22,26 @@ mod packet;
 pub mod utils; // or pub mod ip;
 pub use utils::ip::IntoIpv4Bytes; // Re-export for top-level access
 
+const MESSAGE_CAPACITY: usize = 50; // Maximum number of messages to keep in the UI
+
+macro_rules! push_message {
+    ($tx:expr, $msg:expr) => {{
+        // Send a new message to the UI with event
+        let _ = $tx.send(UiEvent::NewMessage($msg));
+    }};
+}
+
+macro_rules! push_error {
+    ($tx:expr, $msg:expr) => {{
+        let _ = $tx.send(UiEvent::ErrorMessage($msg));
+    }};
+}
+
+enum UiEvent {
+    NewMessage(String),
+    ErrorMessage(String),
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Auto-pick a free IP from 10.10.0.2 to 10.10.0.254
@@ -41,9 +61,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    let mut messages: VecDeque<String> = VecDeque::with_capacity(10);
+    let mut messages: VecDeque<String> = VecDeque::with_capacity(MESSAGE_CAPACITY);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<UiEvent>();
     let mut input = String::new();
     let mut target_index: isize = -1; // -1 means broadcast
+    let mut scroll_offset: u16 = 0;
     enable_raw_mode().unwrap();
     let stdout = io::stdout();
     let backend = CrosstermBackend::new(stdout);
@@ -69,17 +91,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         is_new
                     };
                     if newly_added {
-                        messages.push_back(format!(
-                            "Discovered peer: {}",
-                            msg.source
-                                .iter()
-                                .map(|b| b.to_string())
-                                .collect::<Vec<String>>()
-                                .join(".")
-                        ));
-                        if messages.len() > 10 {
-                            messages.pop_front();
-                        }
+                        push_message!(
+                            tx,
+                            format!(
+                                "Discovered peer: {}",
+                                msg.source
+                                    .iter()
+                                    .map(|b| b.to_string())
+                                    .collect::<Vec<String>>()
+                                    .join(".")
+                            )
+                        );
                     }
                 }
                 PacketType::Request => {
@@ -93,13 +115,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .as_ref()
                         .map(|d| String::from_utf8_lossy(d).to_string())
                         .unwrap_or_else(|| "No data".into());
-                    messages.push_back(format!("From {}: {}", src.ip(), content));
-                    if messages.len() > 10 {
-                        messages.pop_front();
-                    }
+                    push_message!(tx, format!("{}> {}", src.ip(), content));
                 }
                 PacketType::Acknowledgment => client.acknowledge(msg.id),
-                PacketType::Error => eprintln!("Error message from {}: {:?}", src, msg),
+                PacketType::Error => {
+                    push_error!(tx, format!("Error message from {}: {:?}", src, msg))
+                }
             }
         }
 
@@ -114,6 +135,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         input.pop();
                     }
                     KeyCode::Enter => {
+                        if input.is_empty() {
+                            continue; // Ignore empty input
+                        }
+                        // Send the message to the selected target
                         let target = {
                             let peers = known_peers.lock().await;
                             if target_index == -1 || target_index as usize >= peers.len() {
@@ -128,6 +153,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         };
                         let client = client.clone();
+                        let tx = tx.clone();
                         if let Some(ip) = target {
                             let msg = Packet::new(
                                 PacketType::Request,
@@ -143,7 +169,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                             tokio::spawn(async move {
                                 if let Err(e) = client.send_reliable(msg, &target_str).await {
-                                    eprintln!("Send failed: {}", e);
+                                    push_error!(
+                                        tx,
+                                        format!("Failed to send message to {}: {}", target_str, e)
+                                    );
                                 }
                             });
                         } else {
@@ -155,7 +184,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             );
                             tokio::spawn(async move {
                                 if let Err(e) = client.send_to_broadcast_reliable(msg).await {
-                                    eprintln!("Send failed: {}", e);
+                                    push_error!(
+                                        tx,
+                                        format!("Failed to send broadcast message: {}", e)
+                                    );
                                 }
                             });
                         }
@@ -172,7 +204,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     KeyCode::Esc => {
                         break;
                     }
+                    KeyCode::Up => {
+                        if scroll_offset > 0 {
+                            scroll_offset -= 1;
+                        }
+                    }
+                    KeyCode::Down => {
+                        scroll_offset = scroll_offset.saturating_add(1);
+                    }
                     _ => {}
+                }
+            }
+        }
+
+        // Process UI events
+        while let Ok(event) = rx.try_recv() {
+            match event {
+                UiEvent::NewMessage(msg) => {
+                    messages.push_back(msg);
+                    if messages.len() > MESSAGE_CAPACITY {
+                        messages.pop_front();
+                    }
+                    scroll_offset = scroll_offset.saturating_add(1);
+                }
+                UiEvent::ErrorMessage(msg) => {
+                    messages.push_back(msg);
+                    if messages.len() > MESSAGE_CAPACITY {
+                        messages.pop_front();
+                    }
+                    scroll_offset = scroll_offset.saturating_add(1);
                 }
             }
         }
@@ -216,8 +276,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             f.render_widget(input_block, chunks[0]);
 
             let msgs: String = messages.iter().cloned().collect::<Vec<_>>().join("\n");
-            let messages_block = Paragraph::new(msgs.as_str())
-                .block(Block::default().borders(Borders::ALL).title("Messages"));
+            let visible_lines = chunks[1].height.saturating_sub(2); // Subtract borders
+            let total_lines = msgs.lines().count() as u16;
+            let max_scroll = total_lines.saturating_sub(visible_lines);
+            if scroll_offset > max_scroll {
+                scroll_offset = max_scroll;
+            }
+            let messages_block = Paragraph::new(msgs)
+                .block(Block::default().borders(Borders::ALL).title("Messages"))
+                .scroll((scroll_offset, 0));
             f.render_widget(messages_block, chunks[1]);
         })?;
     }
