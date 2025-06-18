@@ -15,6 +15,7 @@ pub struct Packet<S: Serializable> {
     pub source: [u8; 4],      // Using a fixed-size array for source IPv4
     pub destination: [u8; 4], // Using a fixed-size array for destination IPv4
     pub data: Option<S>,
+    pub timestamp: u64, // Logical timestamp for the packet
 }
 
 impl<S: Serializable + Clone> Packet<S> {
@@ -22,6 +23,7 @@ impl<S: Serializable + Clone> Packet<S> {
         type_: PacketType,
         source: I,
         destination: D,
+        timestamp: u64,
         data: Option<S>,
     ) -> Self {
         Packet {
@@ -29,7 +31,8 @@ impl<S: Serializable + Clone> Packet<S> {
             type_,
             source: source.into_ipv4(),
             destination: destination.into_ipv4(),
-            data: data,
+            timestamp,
+            data,
         }
     }
 
@@ -38,6 +41,7 @@ impl<S: Serializable + Clone> Packet<S> {
         type_: PacketType,
         source: I,
         destination: D,
+        timestamp: u64,
         data: Option<S>,
     ) -> Self {
         Packet {
@@ -45,6 +49,7 @@ impl<S: Serializable + Clone> Packet<S> {
             type_,
             source: source.into_ipv4(),
             destination: destination.into_ipv4(),
+            timestamp,
             data: data,
         }
     }
@@ -55,6 +60,7 @@ impl<S: Serializable + Clone> Packet<S> {
             type_: self.type_,
             source: self.source,
             destination: self.destination,
+            timestamp: self.timestamp,
             data: self.data.clone(),
         }
     }
@@ -67,6 +73,7 @@ impl<S: Serializable + Clone> Serializable for Packet<S> {
         serialized.push(self.type_ as u8); // 1 byte for message type
         serialized.extend_from_slice(&self.source); // 4 bytes for source IP
         serialized.extend_from_slice(&self.destination); // 4 bytes for destination IP
+        serialized.extend_from_slice(&self.timestamp.to_le_bytes()); // 8 bytes for timestamp
         if let Some(ref data) = self.data {
             serialized.extend_from_slice(data.serialize().as_slice());
         }
@@ -74,7 +81,7 @@ impl<S: Serializable + Clone> Serializable for Packet<S> {
     }
 
     fn deserialize(data: &[u8]) -> Self {
-        if data.len() < 25 {
+        if data.len() < 33 {
             panic!("Data too short to deserialize a Message");
         }
         if data.len() > 512 {
@@ -102,8 +109,10 @@ impl<S: Serializable + Clone> Serializable for Packet<S> {
         let destination = data[21..25]
             .try_into()
             .expect("Failed to parse destination IP");
+        let timestamp =
+            u64::from_le_bytes(data[25..33].try_into().expect("Failed to parse timestamp"));
 
-        let data = if let Some(d) = data.get(25..) {
+        let data = if let Some(d) = data.get(33..) {
             Some(S::deserialize(d.as_ref()))
         } else {
             None
@@ -114,6 +123,7 @@ impl<S: Serializable + Clone> Serializable for Packet<S> {
             type_,
             source,
             destination,
+            timestamp,
             data: data,
         }
     }
@@ -155,6 +165,7 @@ impl<S: Serializable + Clone> Clone for Packet<S> {
             type_: self.type_,
             source: self.source,
             destination: self.destination,
+            timestamp: self.timestamp,
             data: self.data.clone(),
         }
     }

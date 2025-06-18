@@ -5,23 +5,26 @@ use futures::future::join_all;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::IpAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
+use tokio::sync::Mutex;
 use tokio::sync::Notify;
 use uuid::Uuid;
 
 const PORT: u16 = 34254;
 const INTERFACE: &str = "10.10.0.";
 
-const DROPOUT_TEST_RATIO: f32 = 0.7; // 70% chance of packet loss
-const DROP_DELAY_MS: u64 = 10; // Delay for dropout test
+const DROPOUT_TEST_RATIO: f32 = 1.0; // 70% chance of packet loss
+const DROP_DELAY_MS: u64 = 500; // Delay for dropout test
+const NO_CLOCK_SENTINEL: u64 = 0; // Sentinel value for no clock
 
 pub struct Client {
     socket: UdpSocket,
     pub my_ip: String,
     pending_acks: Arc<Mutex<HashMap<uuid::Uuid, Arc<Notify>>>>,
     seen_messages: Arc<Mutex<HashSet<(std::net::IpAddr, uuid::Uuid, std::time::Instant)>>>,
+    clock: Mutex<u64>, // Logical clock for the client
 }
 
 impl Client {
@@ -48,6 +51,7 @@ impl Client {
             my_ip,
             pending_acks: Arc::new(Mutex::new(HashMap::new())),
             seen_messages: Arc::new(Mutex::new(HashSet::new())),
+            clock: Mutex::new(0), // Initialize the logical clock
         }
     }
 
@@ -61,6 +65,7 @@ impl Client {
                         PacketType::Discovery,
                         client.my_ip.as_str(),
                         "255.255.255.255",
+                        NO_CLOCK_SENTINEL,
                         None,
                     );
                     client.send_to_broadcast(&msg.serialize()).await;
@@ -73,7 +78,10 @@ impl Client {
 
     pub async fn send_to<A: IntoIpv4String>(&self, msg: &[u8], addr: A) -> std::io::Result<usize> {
         // Simulate packet loss for dropout test only on request messages
-        if rand::random::<f32>() < DROPOUT_TEST_RATIO && msg[16].eq(&(PacketType::Request as u8)) {
+        if rand::random::<f32>() < DROPOUT_TEST_RATIO
+            && msg[16].eq(&(PacketType::Request as u8))
+            && false
+        {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 "Simulated packet loss",
@@ -116,7 +124,7 @@ impl Client {
         let notify = Arc::new(Notify::new());
 
         {
-            let mut pending = self.pending_acks.lock().unwrap();
+            let mut pending = self.pending_acks.lock().await;
             pending.insert(msg_id, notify.clone());
         }
 
@@ -126,17 +134,17 @@ impl Client {
             let _ = self.send_to(&serialized, &dest).await;
             // Wait for ack or timeout
             let notified =
-                tokio::time::timeout(Duration::from_millis(250), notify.notified()).await;
+                tokio::time::timeout(Duration::from_millis(300), notify.notified()).await;
             if notified.is_ok() {
                 // Acknowledgment received
-                let mut pending = self.pending_acks.lock().unwrap();
+                let mut pending = self.pending_acks.lock().await;
                 pending.remove(&msg_id);
                 return Ok(());
             }
         }
 
         // Cleanup if no ack received
-        let mut pending = self.pending_acks.lock().unwrap();
+        let mut pending = self.pending_acks.lock().await;
         pending.remove(&msg_id);
         Err(std::io::Error::new(
             std::io::ErrorKind::TimedOut,
@@ -190,9 +198,9 @@ impl Client {
         self.socket.recv_from(buf).await
     }
 
-    pub fn should_process(&self, src_ip: IpAddr, msg_id: Uuid) -> bool {
+    pub async fn should_process(&self, src_ip: IpAddr, msg_id: Uuid) -> bool {
         let now = Instant::now();
-        let mut seen = self.seen_messages.lock().unwrap();
+        let mut seen = self.seen_messages.lock().await;
 
         // Clean old entries
         seen.retain(|&(_, _, timestamp)| now.duration_since(timestamp).as_secs() < 300);
@@ -209,11 +217,10 @@ impl Client {
         true
     }
 
-    pub fn acknowledge(&self, msg_id: uuid::Uuid) {
-        if let Ok(mut pending) = self.pending_acks.lock() {
-            if let Some(notify) = pending.remove(&msg_id) {
-                notify.notify_one();
-            }
+    pub async fn acknowledge(&self, msg_id: uuid::Uuid) {
+        let mut pending = self.pending_acks.lock().await;
+        if let Some(notify) = pending.remove(&msg_id) {
+            notify.notify_one();
         }
     }
 
@@ -227,8 +234,30 @@ impl Client {
             PacketType::Acknowledgment,
             self.my_ip.as_str(),
             msg.source,
+            NO_CLOCK_SENTINEL,
             None,
         );
         let _ = self.send_to(&ack_msg.serialize(), src).await;
+    }
+
+    pub async fn tick(&self) -> u64 {
+        // Increment the logical clock
+        let mut clock = self.clock.lock().await;
+        *clock = clock.wrapping_add(1);
+        *clock
+    }
+
+    pub async fn observe(&self, timestamp: u64) {
+        // Update the logical clock based on observed timestamp
+        let mut clock = self.clock.lock().await;
+        if timestamp > *clock {
+            *clock = timestamp;
+        }
+    }
+
+    pub async fn get_clock(&self) -> u64 {
+        // Get the current value of the logical clock
+        let clock = self.clock.lock().await;
+        *clock
     }
 }

@@ -10,10 +10,12 @@ use ratatui::{
     Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
+    style::{Color, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
-use std::collections::VecDeque;
-use std::io::{self};
+use std::collections::BTreeSet;
+use std::io;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::{Duration, Instant};
@@ -33,15 +35,46 @@ macro_rules! push_message {
     }};
 }
 
-macro_rules! push_error {
-    ($tx:expr, $msg:expr) => {{
-        let _ = $tx.send(UiEvent::ErrorMessage($msg));
+macro_rules! set_error_flag {
+    ($tx:expr, $id:expr) => {{
+        // Set a flag for a message in the UI
+        let _ = $tx.send(UiEvent::SetFlag($id, MessageFlag::Error));
     }};
 }
 
 enum UiEvent {
-    NewMessage(String),
-    ErrorMessage(String),
+    NewMessage(MessageEntry),
+    SetFlag(MessageEntry, MessageFlag),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+enum MessageFlag {
+    Normal,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MessageEntry {
+    timestamp: u64,
+    source: [u8; 4],
+    uts: Instant, // For sorting local only events
+    content: String,
+    flag: MessageFlag,
+}
+
+impl Ord for MessageEntry {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.timestamp
+            .cmp(&other.timestamp)
+            .then_with(|| self.source.cmp(&other.source))
+            .then_with(|| self.uts.cmp(&other.uts))
+    }
+}
+
+impl PartialOrd for MessageEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 #[tokio::main]
@@ -52,18 +85,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Client started with IP: {}", client.my_ip);
 
     let known_peers: Arc<Mutex<IndexMap<[u8; 4], Instant>>> = Arc::new(Mutex::new(IndexMap::new()));
-    // Periodically clean up old peers in the background
+    // Task 0: Periodic cleanup of known peers
     let cleanup_peers = known_peers.clone();
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(Duration::from_millis(500)).await;
+            tokio::time::sleep(Duration::from_millis(1)).await;
             let now = Instant::now();
             let mut peers = cleanup_peers.lock().await;
             peers.retain(|_, last_seen| now.duration_since(*last_seen) < Duration::from_secs(5));
         }
     });
 
-    let mut messages: VecDeque<String> = VecDeque::with_capacity(MESSAGE_CAPACITY);
+    let mut messages: BTreeSet<MessageEntry> = BTreeSet::new();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<UiEvent>();
 
     // Task 1: Packet listener
@@ -88,33 +121,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if newly_added {
                             push_message!(
                                 tx_listener,
-                                format!(
-                                    "Discovered peer: {}",
-                                    msg.source
-                                        .iter()
-                                        .map(|b| b.to_string())
-                                        .collect::<Vec<String>>()
-                                        .join(".")
-                                )
+                                MessageEntry {
+                                    timestamp: client_listener.get_clock().await,
+                                    source: msg.source,
+                                    uts: Instant::now(),
+                                    content: format!(
+                                        "Discovered peer: {}",
+                                        msg.source
+                                            .iter()
+                                            .map(|b| b.to_string())
+                                            .collect::<Vec<String>>()
+                                            .join(".")
+                                    ),
+                                    flag: MessageFlag::Normal
+                                }
                             );
                         }
                     }
                     PacketType::Request => {
                         let _ = client_listener.send_ack(&msg, &msg.source).await;
-                        if !client_listener.should_process(src.ip(), msg.id) {
+                        if !client_listener.should_process(src.ip(), msg.id).await {
                             continue;
                         }
+                        client_listener.observe(msg.timestamp).await;
 
                         let content = msg.data.unwrap_or_else(|| "No data".into());
-                        push_message!(tx_listener, format!("<{}> {}", src.ip(), content));
-                    }
-                    PacketType::Acknowledgment => client_listener.acknowledge(msg.id),
-                    PacketType::Error => {
-                        push_error!(
+                        push_message!(
                             tx_listener,
-                            format!("Error message from {}: {:?}", src, msg)
-                        )
+                            MessageEntry {
+                                timestamp: msg.timestamp,
+                                source: msg.source,
+                                uts: Instant::now(),
+                                content: format!("<{}> {}", src.ip(), content),
+                                flag: MessageFlag::Normal
+                            }
+                        );
                     }
+                    PacketType::Acknowledgment => client_listener.acknowledge(msg.id).await,
+                    PacketType::Error => {}
                 }
             }
         }
@@ -164,10 +208,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let client = client.clone();
                         let tx = tx.clone();
                         if let Some(ip) = target {
+                            let ts = client.tick().await;
                             let msg = Packet::new(
                                 PacketType::Request,
                                 client.my_ip.as_str(),
                                 ip,
+                                ts,
                                 Some(input.clone()),
                             );
                             let target_str = ip
@@ -175,31 +221,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 .map(|b| b.to_string())
                                 .collect::<Vec<_>>()
                                 .join(".");
-                            push_message!(tx, format!("[{}] {}", target_str, input.clone()));
+                            let entry = MessageEntry {
+                                timestamp: ts,
+                                source: client.my_ip.into_ipv4(),
+                                uts: Instant::now(),
+                                content: format!("[{}] {}", target_str, input),
+                                flag: MessageFlag::Normal,
+                            };
+                            push_message!(tx, entry.clone());
                             tokio::spawn(async move {
-                                if let Err(e) = client.send_reliable(msg, ip).await {
-                                    push_error!(
-                                        tx,
-                                        format!("Failed to send message to {}: {}", target_str, e)
-                                    );
+                                if let Err(_) = client.send_reliable(msg, ip).await {
+                                    set_error_flag!(tx, entry);
                                 }
                             });
                         } else {
+                            let ts = client.tick().await;
                             let msg = Packet::new(
                                 PacketType::Request,
                                 client.my_ip.as_str(),
                                 [255, 255, 255, 255], // Broadcast
+                                ts,
                                 Some(input.clone()),
                             );
-                            let peers = known_peers.lock().await;
-                            let peers = peers.keys().cloned().collect::<Vec<_>>();
-                            push_message!(tx, format!("[broadcast] {}", input.clone()));
+                            let peers = {
+                                let peers =
+                                    known_peers.lock().await.keys().cloned().collect::<Vec<_>>();
+                                peers
+                            };
+                            let entry = MessageEntry {
+                                timestamp: ts,
+                                source: client.my_ip.into_ipv4(),
+                                uts: Instant::now(),
+                                content: format!("[broadcast] {}", input),
+                                flag: MessageFlag::Normal,
+                            };
+                            push_message!(tx, entry.clone());
                             tokio::spawn(async move {
-                                if let Err(e) = client.send_multicast_reliable(msg, peers).await {
-                                    push_error!(
-                                        tx,
-                                        format!("Failed to send multicast message: {}", e)
-                                    );
+                                if let Err(_) = client.send_multicast_reliable(msg, peers).await {
+                                    set_error_flag!(tx, entry);
                                 }
                             });
                         }
@@ -233,18 +292,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         while let Ok(event) = rx.try_recv() {
             match event {
                 UiEvent::NewMessage(msg) => {
-                    messages.push_back(msg);
+                    messages.insert(msg);
                     if messages.len() > MESSAGE_CAPACITY {
-                        messages.pop_front();
+                        messages.pop_first();
                     }
                     scroll_offset = scroll_offset.saturating_add(1);
                 }
-                UiEvent::ErrorMessage(msg) => {
-                    messages.push_back(msg);
-                    if messages.len() > MESSAGE_CAPACITY {
-                        messages.pop_front();
+                UiEvent::SetFlag(timestamp, flag) => {
+                    if let Some(existing) = messages.take(&timestamp) {
+                        let mut updated = existing;
+                        updated.flag = flag;
+                        messages.insert(updated);
                     }
-                    scroll_offset = scroll_offset.saturating_add(1);
                 }
             }
         }
@@ -287,14 +346,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             f.render_widget(input_block, chunks[0]);
 
-            let msgs: String = messages.iter().cloned().collect::<Vec<_>>().join("\n");
+            let message_lines: Vec<Line> = messages
+                .iter()
+                .cloned()
+                .map(|msg| {
+                    let style = match msg.flag {
+                        MessageFlag::Error => Style::default().fg(Color::Red),
+                        MessageFlag::Normal => Style::default(),
+                    };
+                    Line::from(Span::styled(msg.content, style))
+                })
+                .collect();
+
             let visible_lines = chunks[1].height.saturating_sub(2); // Subtract borders
-            let total_lines = msgs.lines().count() as u16;
+            let total_lines = message_lines.len() as u16;
             let max_scroll = total_lines.saturating_sub(visible_lines);
             if scroll_offset > max_scroll {
                 scroll_offset = max_scroll;
             }
-            let messages_block = Paragraph::new(msgs)
+
+            let messages_block = Paragraph::new(message_lines)
                 .block(Block::default().borders(Borders::ALL).title("Messages"))
                 .scroll((scroll_offset, 0));
             f.render_widget(messages_block, chunks[1]);
