@@ -7,6 +7,7 @@ use std::collections::HashSet;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tokio::sync::Notify;
@@ -46,12 +47,18 @@ impl Client {
             .expect("Failed to bind UDP socket");
         socket.set_broadcast(true).expect("Could not set broadcast");
 
+        // Get current time in milliseconds since UNIX epoch
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
         Client {
             socket,
             my_ip,
             pending_acks: Arc::new(Mutex::new(HashMap::new())),
             seen_messages: Arc::new(Mutex::new(HashSet::new())),
-            clock: Mutex::new(0), // Initialize the logical clock
+            clock: Mutex::new(now), // Initialize the logical clock
         }
     }
 
@@ -61,11 +68,12 @@ impl Client {
             let client = self.clone(); // Clone Arc for the task
             async move {
                 loop {
+                    let ts = client.tick().await; // Increment the logical clock
                     let msg: Packet<String> = Packet::new(
                         PacketType::Discovery,
                         client.my_ip.as_str(),
                         "255.255.255.255",
-                        NO_CLOCK_SENTINEL,
+                        ts,
                         None,
                     );
                     client.send_to_broadcast(&msg.serialize()).await;

@@ -57,7 +57,6 @@ enum MessageFlag {
 struct MessageEntry {
     timestamp: u64,
     source: [u8; 4],
-    uts: Instant, // For sorting local only events
     content: String,
     flag: MessageFlag,
 }
@@ -67,7 +66,6 @@ impl Ord for MessageEntry {
         self.timestamp
             .cmp(&other.timestamp)
             .then_with(|| self.source.cmp(&other.source))
-            .then_with(|| self.uts.cmp(&other.uts))
     }
 }
 
@@ -110,6 +108,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let msg: Packet<String> = Packet::deserialize(&buf[..n]);
                 match msg.type_ {
                     PacketType::Discovery => {
+                        client_listener.observe(msg.timestamp).await;
                         let newly_added = {
                             // In a block to drop the lock before sending messages
                             let now = Instant::now();
@@ -122,9 +121,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             push_message!(
                                 tx_listener,
                                 MessageEntry {
-                                    timestamp: client_listener.get_clock().await,
+                                    timestamp: msg.timestamp,
                                     source: msg.source,
-                                    uts: Instant::now(),
                                     content: format!(
                                         "Discovered peer: {}",
                                         msg.source
@@ -151,7 +149,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             MessageEntry {
                                 timestamp: msg.timestamp,
                                 source: msg.source,
-                                uts: Instant::now(),
                                 content: format!("<{}> {}", src.ip(), content),
                                 flag: MessageFlag::Normal
                             }
@@ -224,7 +221,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let entry = MessageEntry {
                                 timestamp: ts,
                                 source: client.my_ip.into_ipv4(),
-                                uts: Instant::now(),
                                 content: format!("[{}] {}", target_str, input),
                                 flag: MessageFlag::Normal,
                             };
@@ -251,7 +247,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let entry = MessageEntry {
                                 timestamp: ts,
                                 source: client.my_ip.into_ipv4(),
-                                uts: Instant::now(),
                                 content: format!("[broadcast] {}", input),
                                 flag: MessageFlag::Normal,
                             };
@@ -313,6 +308,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             peers.clone()
         };
 
+        let ts = client.get_clock().await;
+        let clock_display = format!("{:>4}", ts);
+
         // Draw UI with ratatui
         terminal.draw(|f| {
             let size = f.area();
@@ -321,6 +319,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .margin(1)
                 .constraints([Constraint::Length(3), Constraint::Min(1)].as_ref())
                 .split(size);
+
+            let top_chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Min(1), Constraint::Length(10)].as_ref())
+                .split(chunks[0]);
 
             let target_str = {
                 let peers = peers_snapshot;
@@ -344,7 +347,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .borders(Borders::ALL)
                     .title(format!("[{}]>", target_str)),
             );
-            f.render_widget(input_block, chunks[0]);
+            f.render_widget(input_block, top_chunks[0]);
+
+            let clock_block = Paragraph::new(clock_display.as_str())
+                .block(Block::default().borders(Borders::ALL).title("Clock"));
+            f.render_widget(clock_block, top_chunks[1]);
 
             let message_lines: Vec<Line> = messages
                 .iter()
