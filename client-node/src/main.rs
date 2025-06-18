@@ -309,7 +309,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let ts = client.get_clock().await;
-        let clock_display = format!("{:>4}", ts);
+        let clock_display = format!("{:>8}", ts % 1_000_000);
 
         // Draw UI with ratatui
         terminal.draw(|f| {
