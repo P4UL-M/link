@@ -5,3 +5,7 @@ edition = "2024"
 
 [dependencies]
 rand = "0.9.1"
+client_node = { path = "../client-node" }
+tokio = { version = "1", features = ["full"] }
+crossterm = "0.29.0"
+ratatui = "0.29.0"

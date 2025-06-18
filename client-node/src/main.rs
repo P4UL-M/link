@@ -1,6 +1,7 @@
-use crate::client::Client;
-use crate::packet::{Packet, PacketType};
-use crate::utils::traits::Serializable;
+use client_node::client::Client;
+use client_node::packet::{Packet, PacketType};
+use client_node::utils::ip::{IntoIpv4Bytes, IntoIpv4String};
+use client_node::utils::traits::Serializable;
 use crossterm::{
     event::{self, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode},
@@ -18,13 +19,7 @@ use std::collections::BTreeSet;
 use std::io;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio::time::{Duration, Instant};
-pub use utils::ip::{IntoIpv4Bytes, IntoIpv4String}; // Re-export for top-level access
-
-mod client;
-mod message;
-mod packet;
-pub mod utils; // or pub mod ip;
+use tokio::time::{Duration, Instant}; // Re-export for top-level access
 
 const MESSAGE_CAPACITY: usize = 50; // Maximum number of messages to keep in the UI
 

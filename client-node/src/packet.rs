@@ -10,7 +10,7 @@ pub enum PacketType {
 }
 
 pub struct Packet<S: Serializable> {
-    pub(crate) id: uuid::Uuid,
+    pub id: uuid::Uuid,
     pub type_: PacketType,
     pub source: [u8; 4],      // Using a fixed-size array for source IPv4
     pub destination: [u8; 4], // Using a fixed-size array for destination IPv4

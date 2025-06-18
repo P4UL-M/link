@@ -9,7 +9,7 @@ pub enum MessageType {
 }
 
 pub struct Message {
-    pub(crate) id: uuid::Uuid,
+    pub id: uuid::Uuid,
     pub type_: MessageType,
     pub author: String,
     pub recipient: Option<String>,
