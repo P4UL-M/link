@@ -1,7 +1,6 @@
 use client_node::client::Client;
-use client_node::packet::{Packet, PacketType};
-use client_node::utils::ip::{IntoIpv4Bytes, IntoIpv4String};
-use client_node::utils::traits::Serializable;
+use client_node::packet::{PACKET_SIZE, Packet, PacketData, PacketType};
+use client_node::utils::addr::IpAddr;
 use crossterm::{
     event::{self, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode},
@@ -51,7 +50,7 @@ enum MessageFlag {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct MessageEntry {
     timestamp: u64,
-    source: [u8; 4],
+    source: IpAddr,
     content: String,
     flag: MessageFlag,
 }
@@ -77,15 +76,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     client.clone().discover().await?;
     println!("Client started with IP: {}", client.my_ip);
 
-    let known_peers: Arc<Mutex<IndexMap<[u8; 4], Instant>>> = Arc::new(Mutex::new(IndexMap::new()));
+    let known_peers: Arc<Mutex<IndexMap<IpAddr, Instant>>> = Arc::new(Mutex::new(IndexMap::new()));
     // Task 0: Periodic cleanup of known peers
     let cleanup_peers = known_peers.clone();
+    let cleanup_client = client.clone();
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_millis(1)).await;
-            let now = Instant::now();
-            let mut peers = cleanup_peers.lock().await;
-            peers.retain(|_, last_seen| now.duration_since(*last_seen) < Duration::from_secs(5));
+            if cleanup_client.is_discovering().await {
+                let now = Instant::now();
+                let mut peers = cleanup_peers.lock().await;
+                peers
+                    .retain(|_, last_seen| now.duration_since(*last_seen) < Duration::from_secs(5));
+            }
         }
     });
 
@@ -97,10 +100,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tx_listener = tx.clone();
     let known_peers_listener = known_peers.clone();
     tokio::spawn(async move {
-        let mut buf = [0u8; 512];
+        let mut buf = [0u8; PACKET_SIZE];
         loop {
             if let Ok((n, src)) = client_listener.recv_from(&mut buf).await {
-                let msg: Packet<String> = Packet::deserialize(&buf[..n]);
+                let msg: Packet = Packet::deserialize(&buf[..n]).unwrap();
+                if !msg.check_src(src.ip()) {
+                    continue;
+                }
                 match msg.type_ {
                     PacketType::Discovery => {
                         client_listener.observe(msg.timestamp).await;
@@ -117,40 +123,64 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 tx_listener,
                                 MessageEntry {
                                     timestamp: msg.timestamp,
-                                    source: msg.source,
-                                    content: format!(
-                                        "Discovered peer: {}",
-                                        msg.source
-                                            .iter()
-                                            .map(|b| b.to_string())
-                                            .collect::<Vec<String>>()
-                                            .join(".")
-                                    ),
+                                    source: msg.source.into(),
+                                    content: format!("Discovered peer: {}", msg.source),
                                     flag: MessageFlag::Normal
                                 }
                             );
                         }
                     }
                     PacketType::Request => {
-                        let _ = client_listener.send_ack(&msg, &msg.source).await;
-                        if !client_listener.should_process(src.ip(), msg.id).await {
+                        let _ = client_listener.send_ack(&msg, msg.source).await;
+                        if !client_listener.should_process(msg.source, msg.id).await {
                             continue;
                         }
                         client_listener.observe(msg.timestamp).await;
 
-                        let content = msg.data.unwrap_or_else(|| "No data".into());
-                        push_message!(
-                            tx_listener,
-                            MessageEntry {
-                                timestamp: msg.timestamp,
-                                source: msg.source,
-                                content: format!("<{}> {}", src.ip(), content),
-                                flag: MessageFlag::Normal
-                            }
-                        );
+                        if let PacketData::Text(content) = msg.data {
+                            push_message!(
+                                tx_listener,
+                                MessageEntry {
+                                    timestamp: msg.timestamp,
+                                    source: msg.source,
+                                    content: format!("<{}> {}", msg.source, content),
+                                    flag: MessageFlag::Normal
+                                }
+                            );
+                        }
                     }
                     PacketType::Acknowledgment => client_listener.acknowledge(msg.id).await,
-                    PacketType::Error => {}
+                    PacketType::Broadcast => {}
+                    PacketType::DNSDiscovery => {
+                        if client_listener.is_discovering().await {
+                            client_listener.stop_discovery().await;
+                        }
+                        client_listener.send_ack(&msg, msg.source).await;
+                    }
+                    PacketType::DNSUpdate => {
+                        client_listener.observe(msg.timestamp).await;
+                        // Update the known peers with DNS discovery content
+                        let mut peers = known_peers_listener.lock().await;
+                        if let PacketData::Peers(new_peers) = msg.data {
+                            // Remove peers that are not in the new list
+                            peers.retain(|ip, _| new_peers.contains(ip));
+                            // Add new peers from the DNS update
+                            for peer in new_peers {
+                                if !peers.contains_key(&peer) && peer != client_listener.my_ip {
+                                    peers.insert(peer, Instant::now());
+                                    push_message!(
+                                        tx_listener,
+                                        MessageEntry {
+                                            timestamp: msg.timestamp,
+                                            source: peer,
+                                            content: format!("New peer: {}", peer),
+                                            flag: MessageFlag::Normal
+                                        }
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -166,6 +196,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
 
+    // Main event loop
     loop {
         let start_time = Instant::now();
 
@@ -203,19 +234,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let ts = client.tick().await;
                             let msg = Packet::new(
                                 PacketType::Request,
-                                client.my_ip.as_str(),
+                                client.my_ip,
                                 ip,
                                 ts,
-                                Some(input.clone()),
+                                PacketData::Text(input.clone()),
                             );
-                            let target_str = ip
-                                .iter()
-                                .map(|b| b.to_string())
-                                .collect::<Vec<_>>()
-                                .join(".");
+                            let target_str = ip.to_string();
                             let entry = MessageEntry {
                                 timestamp: ts,
-                                source: client.my_ip.into_ipv4(),
+                                source: client.my_ip,
                                 content: format!("[{}] {}", target_str, input),
                                 flag: MessageFlag::Normal,
                             };
@@ -229,10 +256,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let ts = client.tick().await;
                             let msg = Packet::new(
                                 PacketType::Request,
-                                client.my_ip.as_str(),
-                                [255, 255, 255, 255], // Broadcast
+                                client.my_ip,
+                                [255, 255, 255, 255].into(), // Broadcast
                                 ts,
-                                Some(input.clone()),
+                                PacketData::Text(input.clone()),
                             );
                             let peers = {
                                 let peers =
@@ -241,7 +268,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             };
                             let entry = MessageEntry {
                                 timestamp: ts,
-                                source: client.my_ip.into_ipv4(),
+                                source: client.my_ip,
                                 content: format!("[broadcast] {}", input),
                                 flag: MessageFlag::Normal,
                             };
@@ -327,12 +354,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     peers
                         .get_index(target_index as usize)
-                        .map(|(ip, _)| {
-                            ip.iter()
-                                .map(|b| b.to_string())
-                                .collect::<Vec<_>>()
-                                .join(".")
-                        })
+                        .map(|(ip, _)| ip.to_string())
                         .unwrap_or_else(|| "unknown".to_string())
                 }
             };

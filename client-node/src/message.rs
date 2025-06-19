@@ -51,37 +51,65 @@ impl Serializable for Message {
         data
     }
 
-    fn deserialize(data: &[u8]) -> Self {
-        let id = uuid::Uuid::from_slice(&data[0..16]).unwrap();
+    fn deserialize(data: &[u8]) -> Result<Self, String> {
+        if data.len() < 17 {
+            return Err("Data too short to contain UUID and message type".into());
+        }
+
+        let id =
+            uuid::Uuid::from_slice(&data[0..16]).map_err(|_| "Failed to parse UUID from data")?;
+
         let type_ = match data[16] {
             0 => MessageType::Private,
             1 => MessageType::Public,
-            _ => panic!("Unknown message type"),
+            _ => return Err("Unknown message type".into()),
         };
-        let author_end = data[17..].iter().position(|&b| b == 0).unwrap() + 17;
-        let author = String::from_utf8(data[17..author_end].to_vec()).unwrap();
+
+        let author_end = data[17..]
+            .iter()
+            .position(|&b| b == 0)
+            .map(|pos| pos + 17)
+            .ok_or("Missing null terminator after author")?;
+
+        let author = String::from_utf8(data[17..author_end].to_vec())
+            .map_err(|e| format!("Invalid UTF-8 in author: {}", e))?;
 
         let recipient_start = author_end + 1;
+        if recipient_start >= data.len() {
+            return Err("Missing content after author".into());
+        }
+
         let recipient_end = data[recipient_start..]
             .iter()
             .position(|&b| b == 0)
-            .unwrap_or(data.len() - recipient_start)
-            + recipient_start;
+            .map(|pos| pos + recipient_start)
+            .unwrap_or(data.len());
+
         let recipient = if recipient_start < recipient_end {
-            Some(String::from_utf8(data[recipient_start..recipient_end].to_vec()).unwrap())
+            Some(
+                String::from_utf8(data[recipient_start..recipient_end].to_vec())
+                    .map_err(|e| format!("Invalid UTF-8 in recipient: {}", e))?,
+            )
         } else {
             None
         };
 
-        let content = String::from_utf8(data[recipient_end + 1..].to_vec()).unwrap();
+        let content_start = if recipient_end < data.len() {
+            recipient_end + 1
+        } else {
+            data.len()
+        };
 
-        Message {
+        let content = String::from_utf8(data[content_start..].to_vec())
+            .map_err(|e| format!("Invalid UTF-8 in content: {}", e))?;
+
+        Ok(Message {
             id,
             type_,
             author,
             recipient,
             content,
-        }
+        })
     }
 }
 

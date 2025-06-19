@@ -1,38 +1,38 @@
-use crate::packet::{Packet, PacketType};
-use crate::utils::ip::IntoIpv4String;
-use crate::utils::traits::Serializable;
+use crate::packet::{Packet, PacketData, PacketType};
+use crate::utils::addr::IpAddr;
 use futures::future::join_all;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 const PORT: u16 = 34254;
-const INTERFACE: &str = "10.10.0.";
+const INTERFACE: [u8; 4] = [10, 10, 0, 0];
 
-const DROPOUT_TEST_RATIO: f32 = 1.0; // 70% chance of packet loss
-const DROP_DELAY_MS: u64 = 500; // Delay for dropout test
+const DROPOUT_TEST_RATIO: f32 = 0.0; // 0% chance of packet loss
+const DROP_DELAY_MS: u64 = 20; // Delay for dropout test
 const NO_CLOCK_SENTINEL: u64 = 0; // Sentinel value for no clock
 
 pub struct Client {
     socket: UdpSocket,
-    pub my_ip: String,
-    pending_acks: Arc<Mutex<HashMap<uuid::Uuid, Arc<Notify>>>>,
-    seen_messages: Arc<Mutex<HashSet<(std::net::IpAddr, uuid::Uuid, std::time::Instant)>>>,
+    pub my_ip: IpAddr,
+    pending_acks: Arc<Mutex<HashMap<Uuid, Arc<Notify>>>>,
+    seen_messages: Arc<Mutex<HashSet<(IpAddr, Uuid, Instant)>>>,
     clock: Mutex<u64>, // Logical clock for the client
+    discovery_token: Arc<Mutex<Option<CancellationToken>>>,
 }
 
 impl Client {
     pub async fn new() -> Self {
         let mut my_ip = None;
         for i in 2..=50 {
-            let test_ip = format!("{}{}", INTERFACE, i);
+            let test_ip = IpAddr::from_interface(INTERFACE, i as u8);
             let bind_addr = format!("{}:{}", test_ip, PORT);
             if UdpSocket::bind(&bind_addr).await.is_ok() {
                 my_ip = Some(test_ip);
@@ -59,24 +59,31 @@ impl Client {
             pending_acks: Arc::new(Mutex::new(HashMap::new())),
             seen_messages: Arc::new(Mutex::new(HashSet::new())),
             clock: Mutex::new(now), // Initialize the logical clock
+            discovery_token: Arc::new(Mutex::new(None)), // Token for cancellation of discovery
         }
     }
 
     pub async fn discover(self: Arc<Self>) -> std::io::Result<()> {
         // Periodically send discovery packets
+        let token = CancellationToken::new();
+        {
+            let mut guard = self.discovery_token.lock().await;
+            *guard = Some(token.clone());
+        }
+        // Periodically send discovery packets
         tokio::spawn({
             let client = self.clone(); // Clone Arc for the task
             async move {
-                loop {
+                while !token.is_cancelled() {
                     let ts = client.tick().await; // Increment the logical clock
-                    let msg: Packet<String> = Packet::new(
+                    let msg: Packet = Packet::new(
                         PacketType::Discovery,
-                        client.my_ip.as_str(),
-                        "255.255.255.255",
+                        client.my_ip,
+                        "255.255.255.255".into(),
                         ts,
-                        None,
+                        PacketData::Empty,
                     );
-                    client.send_to_broadcast(&msg.serialize()).await;
+                    client.send_to_broadcast(&msg.serialize().unwrap()).await;
                     tokio::time::sleep(Duration::from_secs(2)).await;
                 }
             }
@@ -84,27 +91,23 @@ impl Client {
         Ok(())
     }
 
-    pub async fn send_to<A: IntoIpv4String>(&self, msg: &[u8], addr: A) -> std::io::Result<usize> {
-        // Simulate packet loss for dropout test only on request messages
-        if rand::random::<f32>() < DROPOUT_TEST_RATIO
-            && msg[16].eq(&(PacketType::Request as u8))
-            && false
-        {
+    pub async fn send_to(&self, msg: &[u8], addr: IpAddr) -> std::io::Result<usize> {
+        // Simulate packet loss for dropout test
+        if rand::random::<f32>() < DROPOUT_TEST_RATIO {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 "Simulated packet loss",
             ));
         }
         // Simulate a delay for dropout test
-        if rand::random::<f32>() < DROPOUT_TEST_RATIO && msg[16].eq(&(PacketType::Request as u8)) {
+        if rand::random::<f32>() < DROPOUT_TEST_RATIO {
             tokio::time::sleep(Duration::from_millis(
                 DROP_DELAY_MS + rand::random::<u64>() % (DROP_DELAY_MS * 4),
             ))
             .await;
         }
         // Utilisation du trait pour obtenir la chaîne d'adresse
-        let addr_str = addr.into_ipv4_string();
-        let addr = format!("{}:{}", addr_str, PORT);
+        let addr = format!("{}:{}", addr, PORT);
         // Check if the address is valid
         let addr: std::net::SocketAddr = addr.parse().expect("Invalid address format");
         self.socket.send_to(msg, addr).await
@@ -112,7 +115,7 @@ impl Client {
 
     pub async fn send_to_broadcast(&self, msg: &[u8]) {
         for i in 2..=50 {
-            let addr = format!("{}{}", INTERFACE, i);
+            let addr = IpAddr::from_interface(INTERFACE, i as u8);
             if addr == self.my_ip {
                 continue;
             }
@@ -120,14 +123,7 @@ impl Client {
         }
     }
 
-    pub async fn send_reliable<A, S: Serializable + Clone>(
-        &self,
-        msg: Packet<S>,
-        dest: A,
-    ) -> std::io::Result<()>
-    where
-        for<'a> &'a A: IntoIpv4String,
-    {
+    pub async fn send_reliable(&self, msg: Packet, dest: IpAddr) -> std::io::Result<()> {
         let msg_id = msg.id;
         let notify = Arc::new(Notify::new());
 
@@ -136,10 +132,10 @@ impl Client {
             pending.insert(msg_id, notify.clone());
         }
 
-        let serialized = msg.serialize();
+        let serialized = msg.serialize().unwrap();
 
         for _ in 0..5 {
-            let _ = self.send_to(&serialized, &dest).await;
+            let _ = self.send_to(&serialized, dest).await;
             // Wait for ack or timeout
             let notified =
                 tokio::time::timeout(Duration::from_millis(300), notify.notified()).await;
@@ -160,16 +156,11 @@ impl Client {
         ))
     }
 
-    pub async fn send_multicast_reliable<A, S: Serializable + Clone>(
+    pub async fn send_multicast_reliable(
         self: Arc<Self>,
-        msg: Packet<S>,
-        addrs: Vec<A>,
-    ) -> std::io::Result<()>
-    where
-        for<'a> &'a A: IntoIpv4String,
-        A: std::marker::Send + std::marker::Sync + 'static,
-        S: std::marker::Send + std::marker::Sync + 'static,
-    {
+        msg: Packet,
+        addrs: Vec<IpAddr>,
+    ) -> std::io::Result<()> {
         let mut tasks = Vec::new();
 
         for addr in addrs {
@@ -232,20 +223,16 @@ impl Client {
         }
     }
 
-    pub async fn send_ack<A, S>(&self, msg: &Packet<S>, src: &A)
-    where
-        for<'a> &'a A: IntoIpv4String,
-        S: Serializable + Clone,
-    {
-        let ack_msg: Packet<String> = Packet::new_with_id(
+    pub async fn send_ack(&self, msg: &Packet, src: IpAddr) {
+        let ack_msg = Packet::new_with_id(
             msg.id,
             PacketType::Acknowledgment,
-            self.my_ip.as_str(),
+            self.my_ip,
             msg.source,
             NO_CLOCK_SENTINEL,
-            None,
+            PacketData::Empty,
         );
-        let _ = self.send_to(&ack_msg.serialize(), src).await;
+        let _ = self.send_to(&ack_msg.serialize().unwrap(), src).await;
     }
 
     pub async fn tick(&self) -> u64 {
@@ -267,5 +254,15 @@ impl Client {
         // Get the current value of the logical clock
         let clock = self.clock.lock().await;
         *clock
+    }
+
+    pub async fn stop_discovery(&self) {
+        if let Some(token) = self.discovery_token.lock().await.take() {
+            token.cancel();
+        }
+    }
+
+    pub async fn is_discovering(&self) -> bool {
+        self.discovery_token.lock().await.is_some()
     }
 }
