@@ -1,14 +1,15 @@
 use crate::packet::{Packet, PacketData, PacketType};
 use crate::utils::addr::IpAddr;
+use crate::utils::key::Key;
 use futures::future::join_all;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tokio::sync::Notify;
+use tokio::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -19,6 +20,12 @@ const DROPOUT_TEST_RATIO: f32 = 0.0; // 0% chance of packet loss
 const DROP_DELAY_MS: u64 = 20; // Delay for dropout test
 const NO_CLOCK_SENTINEL: u64 = 0; // Sentinel value for no clock
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ClientMode {
+    Normal,
+    SSL(Key, Instant), // SSL mode with a key and timestamp
+}
+
 pub struct Client {
     socket: UdpSocket,
     pub my_ip: IpAddr,
@@ -26,6 +33,7 @@ pub struct Client {
     seen_messages: Arc<Mutex<HashSet<(IpAddr, Uuid, Instant)>>>,
     clock: Mutex<u64>, // Logical clock for the client
     discovery_token: Arc<Mutex<Option<CancellationToken>>>,
+    mode: Arc<Mutex<ClientMode>>, // Client mode
 }
 
 impl Client {
@@ -60,6 +68,7 @@ impl Client {
             seen_messages: Arc::new(Mutex::new(HashSet::new())),
             clock: Mutex::new(now), // Initialize the logical clock
             discovery_token: Arc::new(Mutex::new(None)), // Token for cancellation of discovery
+            mode: Arc::new(Mutex::new(ClientMode::Normal)), // Default mode
         }
     }
 
@@ -264,5 +273,36 @@ impl Client {
 
     pub async fn is_discovering(&self) -> bool {
         self.discovery_token.lock().await.is_some()
+    }
+
+    pub async fn set_mode(self: Arc<Self>, mode: ClientMode) {
+        // check if the mode is already set
+        *self.mode.lock().await = mode;
+        match *self.mode.lock().await {
+            ClientMode::Normal => {
+                // Stop any ongoing SSL operations
+
+                // Start normal operations
+                if !self.is_discovering().await {
+                    self.clone()
+                        .discover()
+                        .await
+                        .expect("Failed to start discovery");
+                }
+            }
+            ClientMode::SSL(_, _) => {
+                // Stop discovery if it was ongoing
+                if self.is_discovering().await {
+                    self.stop_discovery().await;
+                }
+                // Start SSL operations with the provided key
+            }
+        }
+    }
+
+    pub async fn get_mode(&self) -> ClientMode {
+        // Get the current mode of the client
+        let mode = self.mode.lock().await;
+        mode.clone()
     }
 }

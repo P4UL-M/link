@@ -1,6 +1,7 @@
-use client_node::client::Client;
+use client_node::client::{Client, ClientMode};
 use client_node::packet::{PACKET_SIZE, Packet, PacketData, PacketType};
 use client_node::utils::addr::IpAddr;
+use client_node::utils::key::Key;
 use crossterm::{
     event::{self, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode},
@@ -82,12 +83,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cleanup_client = client.clone();
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(Duration::from_millis(1)).await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
             if cleanup_client.is_discovering().await {
                 let now = Instant::now();
                 let mut peers = cleanup_peers.lock().await;
                 peers
                     .retain(|_, last_seen| now.duration_since(*last_seen) < Duration::from_secs(5));
+            } else {
+                if let ClientMode::SSL(_, timestamp) = cleanup_client.get_mode().await
+                    && timestamp.elapsed() > Duration::from_secs(10)
+                {
+                    cleanup_client.clone().set_mode(ClientMode::Normal).await;
+                }
             }
         }
     });
@@ -99,6 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client_listener = client.clone();
     let tx_listener = tx.clone();
     let known_peers_listener = known_peers.clone();
+    let client_key = Key::generate(); // Generate a new key for the client
     tokio::spawn(async move {
         let mut buf = [0u8; PACKET_SIZE];
         loop {
@@ -114,9 +122,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             // In a block to drop the lock before sending messages
                             let now = Instant::now();
                             let mut peers = known_peers_listener.lock().await;
-                            let is_new = !peers.contains_key(&msg.source);
-                            peers.insert(msg.source, now);
-                            is_new
+                            peers.insert(msg.source, now).is_none()
                         };
                         if newly_added {
                             push_message!(
@@ -152,18 +158,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     PacketType::Acknowledgment => client_listener.acknowledge(msg.id).await,
                     PacketType::Broadcast => {}
                     PacketType::DNSDiscovery => {
-                        if client_listener.is_discovering().await {
-                            client_listener.stop_discovery().await;
-                        }
+                        client_listener
+                            .clone()
+                            .set_mode(ClientMode::SSL(client_key.clone(), Instant::now()))
+                            .await;
                         client_listener.send_ack(&msg, msg.source).await;
                     }
                     PacketType::DNSUpdate => {
+                        if client_listener.is_discovering().await {
+                            continue; // Ignore DNS updates during discovery
+                        }
                         client_listener.observe(msg.timestamp).await;
                         // Update the known peers with DNS discovery content
                         let mut peers = known_peers_listener.lock().await;
                         if let PacketData::Peers(new_peers) = msg.data {
                             // Remove peers that are not in the new list
-                            peers.retain(|ip, _| new_peers.contains(ip));
+                            peers.retain(|ip, _| new_peers.contains(ip)); // ! this line is dangerous as it remove peers that are not known from the auth server but still exist on the network like no ssl node
                             // Add new peers from the DNS update
                             for peer in new_peers {
                                 if !peers.contains_key(&peer) && peer != client_listener.my_ip {
@@ -331,7 +341,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let ts = client.get_clock().await;
+        let mode = client.get_mode().await;
         let clock_display = format!("{:>8}", ts % 1_000_000);
+        let mode_display = match mode {
+            ClientMode::Normal => format!("{:>8}", "Normal"),
+            ClientMode::SSL(_, _) => format!("{:>8}", "SSL"),
+        };
 
         // Draw UI with ratatui
         terminal.draw(|f| {
@@ -344,7 +359,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let top_chunks = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Min(1), Constraint::Length(10)].as_ref())
+                .constraints(
+                    [
+                        Constraint::Min(1),
+                        Constraint::Length(10),
+                        Constraint::Length(10),
+                    ]
+                    .as_ref(),
+                )
                 .split(chunks[0]);
 
             let target_str = {
@@ -369,6 +391,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let clock_block = Paragraph::new(clock_display.as_str())
                 .block(Block::default().borders(Borders::ALL).title("Clock"));
             f.render_widget(clock_block, top_chunks[1]);
+
+            let mode_block = Paragraph::new(mode_display.as_str())
+                .block(Block::default().borders(Borders::ALL).title("Mode"));
+            f.render_widget(mode_block, top_chunks[2]);
 
             let message_lines: Vec<Line> = messages
                 .iter()

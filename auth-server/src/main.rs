@@ -37,14 +37,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     server.discover().await?;
 
     let known_peers: Arc<Mutex<IndexMap<IpAddr, Instant>>> = Arc::new(Mutex::new(IndexMap::new()));
+
     // Task 0: Periodic cleanup of known peers
+    let cleanup_client = server.get_client();
     let cleanup_peers = known_peers.clone();
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_millis(1)).await;
             let now = Instant::now();
             let mut peers = cleanup_peers.lock().await;
+            let lenght_before = peers.len();
             peers.retain(|_, last_seen| now.duration_since(*last_seen) < Duration::from_secs(10));
+            if peers.len() != lenght_before {
+                // Send update to all clients
+                let ts = cleanup_client.tick().await;
+                let peers: Vec<IpAddr> = peers.keys().cloned().collect();
+                let msg = Packet::new(
+                    PacketType::DNSUpdate,
+                    cleanup_client.my_ip,
+                    "255.255.255.255".into(),
+                    ts,
+                    PacketData::Peers(peers.clone()),
+                );
+                let _ = cleanup_client
+                    .clone()
+                    .send_multicast_reliable(msg, peers)
+                    .await;
+            }
         }
     });
 

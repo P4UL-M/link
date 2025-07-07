@@ -18,6 +18,7 @@ pub enum PacketType {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PacketData {
     Text(String),
+    SSLText(Vec<u8>), // Using Vec<u8> for SSL text data
     Peers(Vec<IpAddr>),
     Empty,
 }
