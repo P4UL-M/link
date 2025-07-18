@@ -1,4 +1,5 @@
-use client_node::client::{Client, ClientMode};
+use crate::client::{Client, ClientMode, Status};
+use client_node::network_core::NetworkCore;
 use client_node::packet::{PACKET_SIZE, Packet, PacketData, PacketType};
 use client_node::utils::addr::IpAddr;
 use client_node::utils::key::Key;
@@ -17,9 +18,12 @@ use ratatui::{
 };
 use std::collections::BTreeSet;
 use std::io;
+use std::os::macos::raw::stat;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::{Duration, Instant}; // Re-export for top-level access
+
+mod client;
 
 const MESSAGE_CAPACITY: usize = 50; // Maximum number of messages to keep in the UI
 
@@ -73,9 +77,10 @@ impl PartialOrd for MessageEntry {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Auto-pick a free IP from 10.10.0.2 to 10.10.0.254
-    let client = Arc::new(Client::new().await);
-    client.clone().discover().await?;
-    println!("Client started with IP: {}", client.my_ip);
+    let ntc = Arc::new(NetworkCore::new().await);
+    let client = Arc::new(Client::new(ntc));
+
+    client.clone().set_mode(ClientMode::Normal).await;
 
     let known_peers: Arc<Mutex<IndexMap<IpAddr, Instant>>> = Arc::new(Mutex::new(IndexMap::new()));
     // Task 0: Periodic cleanup of known peers
@@ -90,7 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 peers
                     .retain(|_, last_seen| now.duration_since(*last_seen) < Duration::from_secs(5));
             } else {
-                if let ClientMode::SSL(_, timestamp) = cleanup_client.get_mode().await
+                if let ClientMode::SSL(_, _, _, timestamp) = cleanup_client.get_mode().await
                     && timestamp.elapsed() > Duration::from_secs(10)
                 {
                     cleanup_client.clone().set_mode(ClientMode::Normal).await;
@@ -104,20 +109,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Task 1: Packet listener
     let client_listener = client.clone();
+    let ntc = client.get_network_core();
     let tx_listener = tx.clone();
     let known_peers_listener = known_peers.clone();
     let client_key = Key::generate(); // Generate a new key for the client
     tokio::spawn(async move {
         let mut buf = [0u8; PACKET_SIZE];
         loop {
-            if let Ok((n, src)) = client_listener.recv_from(&mut buf).await {
+            if let Ok((n, src)) = ntc.recv_from(&mut buf).await {
                 let msg: Packet = Packet::deserialize(&buf[..n]).unwrap();
                 if !msg.check_src(src.ip()) {
                     continue;
                 }
                 match msg.type_ {
                     PacketType::Discovery => {
-                        client_listener.observe(msg.timestamp).await;
+                        ntc.observe(msg.timestamp).await;
                         let newly_added = {
                             // In a block to drop the lock before sending messages
                             let now = Instant::now();
@@ -137,38 +143,112 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     PacketType::Request => {
-                        let _ = client_listener.send_ack(&msg, msg.source).await;
-                        if !client_listener.should_process(msg.source, msg.id).await {
+                        let _ = ntc.send_ack(&msg, msg.source).await;
+                        if !ntc.should_process(msg.source, msg.id).await {
                             continue;
                         }
-                        client_listener.observe(msg.timestamp).await;
+                        ntc.observe(msg.timestamp).await;
 
-                        if let PacketData::Text(content) = msg.data {
-                            push_message!(
-                                tx_listener,
-                                MessageEntry {
-                                    timestamp: msg.timestamp,
-                                    source: msg.source,
-                                    content: format!("<{}> {}", msg.source, content),
-                                    flag: MessageFlag::Normal
+                        match msg.data {
+                            PacketData::Text(content) => {
+                                push_message!(
+                                    tx_listener,
+                                    MessageEntry {
+                                        timestamp: msg.timestamp,
+                                        source: msg.source,
+                                        content: format!("<{}> {}", msg.source, content),
+                                        flag: MessageFlag::Normal
+                                    }
+                                );
+                            }
+                            PacketData::KeyVerification(data) => {
+                                if let ClientMode::SSL(key, server_ip, status, _) =
+                                    client_listener.get_mode().await
+                                {
+                                    if server_ip != msg.source {
+                                        continue; // Ignore if the source is not the expected server IP
+                                    }
+                                    if status == Status::Ready {
+                                        // If already in SSL mode, ignore the verification
+                                        continue;
+                                    }
+                                    let message = key.decode_message(&data);
+                                    let message = Packet::new(
+                                        PacketType::Request,
+                                        ntc.my_ip,
+                                        msg.source,
+                                        msg.timestamp,
+                                        PacketData::KeyVerification(message.into_bytes()),
+                                    );
+                                    let ntc = ntc.clone();
+                                    tokio::spawn(async move {
+                                        let _ = ntc.send_reliable(message, msg.source).await;
+                                    });
                                 }
-                            );
+                            }
+                            PacketData::KeyValidation => {
+                                if let ClientMode::SSL(key, server_ip, status, _) =
+                                    client_listener.get_mode().await
+                                {
+                                    if server_ip != msg.source {
+                                        continue; // Ignore if the source is not the expected server IP
+                                    }
+                                    if status == Status::Ready {
+                                        // If already in SSL mode, ignore the validation
+                                        continue;
+                                    }
+                                    // Switch to SSL mode with the discovered key
+                                    client_listener
+                                        .clone()
+                                        .set_mode(ClientMode::SSL(
+                                            key,
+                                            msg.source,
+                                            Status::Ready,
+                                            Instant::now(),
+                                        ))
+                                        .await;
+                                }
+                            }
+                            _ => {} // Ignore other packet data types
                         }
                     }
-                    PacketType::Acknowledgment => client_listener.acknowledge(msg.id).await,
+                    PacketType::Acknowledgment => ntc.acknowledge(msg.id).await,
                     PacketType::Broadcast => {}
                     PacketType::DNSDiscovery => {
-                        client_listener
-                            .clone()
-                            .set_mode(ClientMode::SSL(client_key.clone(), Instant::now()))
-                            .await;
-                        client_listener.send_ack(&msg, msg.source).await;
+                        ntc.send_dns_ack(&msg, msg.source).await;
+                        if let ClientMode::SSL(client_key, server_ip, status, _) =
+                            client_listener.get_mode().await
+                        {
+                            if server_ip != msg.source {
+                                continue; // Ignore if the source is not the expected server IP
+                            }
+                            client_listener
+                                .clone()
+                                .set_mode(ClientMode::SSL(
+                                    client_key,
+                                    server_ip,
+                                    status,
+                                    Instant::now(),
+                                ))
+                                .await;
+                        } else {
+                            // If not in SSL mode, switch to SSL mode with the discovered key
+                            client_listener
+                                .clone()
+                                .set_mode(ClientMode::SSL(
+                                    client_key.clone(),
+                                    msg.source,
+                                    Status::Initializing,
+                                    Instant::now(),
+                                ))
+                                .await;
+                        }
                     }
                     PacketType::DNSUpdate => {
                         if client_listener.is_discovering().await {
                             continue; // Ignore DNS updates during discovery
                         }
-                        client_listener.observe(msg.timestamp).await;
+                        ntc.observe(msg.timestamp).await;
                         // Update the known peers with DNS discovery content
                         let mut peers = known_peers_listener.lock().await;
                         if let PacketData::Peers(new_peers) = msg.data {
@@ -176,7 +256,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             peers.retain(|ip, _| new_peers.contains(ip)); // ! this line is dangerous as it remove peers that are not known from the auth server but still exist on the network like no ssl node
                             // Add new peers from the DNS update
                             for peer in new_peers {
-                                if !peers.contains_key(&peer) && peer != client_listener.my_ip {
+                                if !peers.contains_key(&peer) && peer != ntc.my_ip {
                                     peers.insert(peer, Instant::now());
                                     push_message!(
                                         tx_listener,
@@ -191,6 +271,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                     }
+                    PacketType::DNSAcknowledgment => {}
                 }
             }
         }
@@ -206,6 +287,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
 
+    let ntc = client.get_network_core();
     // Main event loop
     loop {
         let start_time = Instant::now();
@@ -238,13 +320,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 )
                             }
                         };
-                        let client = client.clone();
                         let tx = tx.clone();
                         if let Some(ip) = target {
-                            let ts = client.tick().await;
+                            let ts = ntc.tick().await;
                             let msg = Packet::new(
                                 PacketType::Request,
-                                client.my_ip,
+                                ntc.my_ip,
                                 ip,
                                 ts,
                                 PacketData::Text(input.clone()),
@@ -252,21 +333,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let target_str = ip.to_string();
                             let entry = MessageEntry {
                                 timestamp: ts,
-                                source: client.my_ip,
+                                source: ntc.my_ip,
                                 content: format!("[{}] {}", target_str, input),
                                 flag: MessageFlag::Normal,
                             };
                             push_message!(tx, entry.clone());
+                            let ntc = ntc.clone();
                             tokio::spawn(async move {
-                                if let Err(_) = client.send_reliable(msg, ip).await {
+                                if let Err(_) = ntc.send_reliable(msg, ip).await {
                                     set_error_flag!(tx, entry);
                                 }
                             });
                         } else {
-                            let ts = client.tick().await;
+                            let ts = ntc.tick().await;
                             let msg = Packet::new(
                                 PacketType::Request,
-                                client.my_ip,
+                                ntc.my_ip,
                                 [255, 255, 255, 255].into(), // Broadcast
                                 ts,
                                 PacketData::Text(input.clone()),
@@ -278,13 +360,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             };
                             let entry = MessageEntry {
                                 timestamp: ts,
-                                source: client.my_ip,
+                                source: ntc.my_ip,
                                 content: format!("[broadcast] {}", input),
                                 flag: MessageFlag::Normal,
                             };
                             push_message!(tx, entry.clone());
+                            let ntc = ntc.clone();
                             tokio::spawn(async move {
-                                if let Err(_) = client.send_multicast_reliable(msg, peers).await {
+                                if let Err(_) =
+                                    ntc.clone().send_multicast_reliable(msg, peers).await
+                                {
                                     set_error_flag!(tx, entry);
                                 }
                             });
@@ -340,12 +425,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             peers.clone()
         };
 
-        let ts = client.get_clock().await;
+        let ts = ntc.get_clock().await;
         let mode = client.get_mode().await;
         let clock_display = format!("{:>8}", ts % 1_000_000);
         let mode_display = match mode {
             ClientMode::Normal => format!("{:>8}", "Normal"),
-            ClientMode::SSL(_, _) => format!("{:>8}", "SSL"),
+            ClientMode::SSL(_, _, _, _) => format!("{:>8}", "SSL"),
+            ClientMode::Initializing => format!("{:>8}", "Initializing"),
         };
 
         // Draw UI with ratatui

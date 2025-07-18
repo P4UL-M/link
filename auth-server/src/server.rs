@@ -1,4 +1,4 @@
-use client_node::client::Client;
+use client_node::network_core::NetworkCore;
 use client_node::packet::{Packet, PacketData, PacketType};
 use std::sync::Arc;
 use std::time::Duration;
@@ -6,14 +6,14 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 pub struct Server {
-    client: Arc<Client>,
+    network_core: Arc<NetworkCore>,
     cancellation_token: Arc<Mutex<Option<CancellationToken>>>,
 }
 
 impl Server {
-    pub fn new(client: Arc<Client>) -> Self {
+    pub fn new(network_core: Arc<NetworkCore>) -> Self {
         Server {
-            client,
+            network_core,
             cancellation_token: Arc::new(Mutex::new(None)),
         }
     }
@@ -26,7 +26,7 @@ impl Server {
             *guard = Some(token.clone());
         }
         tokio::spawn({
-            let client = self.client.clone(); // Clone Arc for the task
+            let client = self.network_core.clone(); // Clone Arc for the task
             async move {
                 while !token.is_cancelled() {
                     let ts = client.tick().await; // Increment the logical clock
@@ -55,8 +55,8 @@ impl Server {
         Ok(())
     }
 
-    pub fn get_client(&self) -> Arc<Client> {
-        self.client.clone()
+    pub fn get_network_core(&self) -> Arc<NetworkCore> {
+        self.network_core.clone()
     }
 
     pub async fn stop_discovery(&self) {

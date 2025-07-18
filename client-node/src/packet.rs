@@ -1,4 +1,4 @@
-use crate::utils::addr::IpAddr;
+use crate::utils::{addr::IpAddr, key::SerializableKey};
 use bincode;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -13,6 +13,7 @@ pub enum PacketType {
     Broadcast,
     DNSDiscovery,
     DNSUpdate,
+    DNSAcknowledgment,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -20,6 +21,10 @@ pub enum PacketData {
     Text(String),
     SSLText(Vec<u8>), // Using Vec<u8> for SSL text data
     Peers(Vec<IpAddr>),
+    KeyExchange(SerializableKey),
+    KeyVerification(Vec<u8>),
+    KeyValidation,
+    Multipart([usize; 2], Vec<u8>), // Using Vec<u8> for multipart data
     Empty,
 }
 

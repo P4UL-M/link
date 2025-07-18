@@ -13,7 +13,7 @@ pub struct Key {
     pub private_key: RsaPrivateKey,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SerializableKey {
     pub public_key: Vec<u8>,  // Using Vec<u8> for serialization
     pub private_key: Vec<u8>, // Using Vec<u8> for serialization
@@ -29,7 +29,7 @@ impl Key {
 
     pub fn generate() -> Self {
         let mut rng = OsRng::default();
-        let private_key = RsaPrivateKey::new(&mut rng, 1024).expect("key gen failed");
+        let private_key = RsaPrivateKey::new(&mut rng, 512).expect("key gen failed");
         let public_key = RsaPublicKey::from(&private_key);
         Key {
             public_key,
@@ -47,6 +47,15 @@ impl Key {
         self.public_key
             .encrypt(&mut OsRng, Pkcs1v15Encrypt, message.as_bytes())
             .unwrap()
+    }
+
+    pub fn decode_message(self, encrypted_message: &[u8]) -> String {
+        // decode the message using the private key
+        let decrypted = self
+            .private_key
+            .decrypt(Pkcs1v15Encrypt, encrypted_message)
+            .expect("Decryption failed");
+        String::from_utf8(decrypted).expect("Invalid UTF-8")
     }
 
     pub fn to_serializable(&self) -> SerializableKey {

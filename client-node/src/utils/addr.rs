@@ -35,6 +35,14 @@ impl IpAddr {
         }
         Ok(IpAddr { address })
     }
+
+    pub fn to_socket_addr(&self, port: u16) -> std::net::SocketAddr {
+        let addr = format!(
+            "{}.{}.{}.{}:{}",
+            self.address[0], self.address[1], self.address[2], self.address[3], port
+        );
+        addr.parse().expect("Invalid socket address format")
+    }
 }
 
 impl Into<[u8; 4]> for IpAddr {
