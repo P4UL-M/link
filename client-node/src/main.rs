@@ -548,13 +548,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ClientMode::Initializing => format!("{:>8}", "Initializing"),
         };
 
+        fn calculate_input_height(input: &str, width: u16) -> u16 {
+            let lines: Vec<&str> = input.lines().collect();
+            let mut total_lines = 0;
+            for line in lines {
+                let line_width = line.chars().count() as u16;
+                let wrapped_lines = (line_width + width - 1) / width;
+                total_lines += wrapped_lines.max(1);
+            }
+            // println!("Total lines: {}", total_lines);
+            if total_lines <= 1 {
+                3 // At least one line for input
+            } else {
+                total_lines + 2 // Return the calculated number of lines
+            }
+        }
+
         // Draw UI with ratatui
         terminal.draw(|f| {
             let size = f.area();
+            let input_height = calculate_input_height(&input, size.width - 20 - 5);
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .margin(1)
-                .constraints([Constraint::Length(3), Constraint::Min(1)].as_ref())
+                .constraints([Constraint::Length(input_height), Constraint::Min(1)].as_ref())
                 .split(size);
 
             let top_chunks = Layout::default()
@@ -581,11 +598,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
 
-            let input_block = Paragraph::new(input.as_str()).block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(format!("[{}]>", target_str)),
-            );
+            let input_block = Paragraph::new(input.as_str())
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(format!("[{}]>", target_str)),
+                )
+                .wrap(ratatui::widgets::Wrap { trim: true });
             f.render_widget(input_block, top_chunks[0]);
 
             let clock_block = Paragraph::new(clock_display.as_str())
@@ -629,6 +648,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let messages_block = Paragraph::new(message_lines)
                 .block(Block::default().borders(Borders::ALL).title("Messages"))
+                .wrap(ratatui::widgets::Wrap { trim: true })
                 .scroll((scroll_offset, 0));
             f.render_widget(messages_block, chunks[1]);
         })?;
