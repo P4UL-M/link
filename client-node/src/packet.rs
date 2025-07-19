@@ -24,6 +24,8 @@ pub enum PacketData {
     KeyExchange(SerializableKey),
     KeyVerification(Vec<u8>),
     KeyValidation,
+    KeyRequest(IpAddr),
+    KeyResponse(IpAddr, SerializableKey),
     Multipart([usize; 2], Vec<u8>), // Using Vec<u8> for multipart data
     Empty,
 }

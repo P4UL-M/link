@@ -2,7 +2,7 @@ use crate::utils::generate_validation_string;
 use client_node::network_core::NetworkCore;
 use client_node::packet::{PACKET_SIZE, Packet, PacketData, PacketType};
 use client_node::utils::addr::IpAddr;
-use client_node::utils::key::Key;
+use client_node::utils::key::{PublicKey, SerializableKey};
 use crossterm::{
     event::{self, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode},
@@ -18,7 +18,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 use server::Server;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -41,6 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     server.discover().await?;
 
     let known_peers: Arc<Mutex<IndexMap<IpAddr, Instant>>> = Arc::new(Mutex::new(IndexMap::new()));
+    let known_keys: Arc<Mutex<IndexMap<IpAddr, PublicKey>>> = Arc::new(Mutex::new(IndexMap::new()));
 
     // Task 0: Periodic cleanup of known peers
     let cleanup_ntc = server.get_network_core();
@@ -71,10 +72,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // Task 0.5: Periodic update broadcast
+    let update_ntc = server.get_network_core();
+    let update_peers = known_peers.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(8)).await;
+            let ts = update_ntc.tick().await;
+            let peers: Vec<IpAddr> = {
+                let peers = update_peers.lock().await;
+                peers.keys().cloned().collect()
+            };
+            let msg = Packet::new(
+                PacketType::DNSUpdate,
+                update_ntc.my_ip,
+                "255.255.255.255".into(),
+                ts,
+                PacketData::Peers(peers.clone()),
+            );
+            let _ = update_ntc.clone().send_multicast_reliable(msg, peers).await;
+        }
+    });
+
     // Task 1: Listen for incoming packets
     let recv_ntc = server.get_network_core();
     let recv_peers = known_peers.clone();
-    let mut cypher_tests: HashSet<String> = HashSet::new();
+    let recv_keys = known_keys.clone();
+    let cypher_tests: Arc<Mutex<HashMap<String, SerializableKey>>> =
+        Arc::new(Mutex::new(HashMap::new()));
     tokio::spawn(async move {
         let mut buf = [0u8; PACKET_SIZE];
         loop {
@@ -103,17 +128,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     PacketType::Request => {
-                        recv_ntc.send_ack(&msg, msg.source).await;
+                        let _ = recv_ntc.send_ack(&msg, msg.source).await;
                         if !recv_ntc.should_process(msg.source, msg.id).await {
                             continue; // Skip processing if the message is not new
                         }
+                        recv_ntc.observe(msg.timestamp).await;
+
                         match msg.data {
                             PacketData::KeyExchange(key) => {
                                 let test = generate_validation_string(&msg.source, &Instant::now());
-                                cypher_tests.insert(test.clone());
+                                cypher_tests.lock().await.insert(test.clone(), key.clone());
+                                let cypher_tests = cypher_tests.clone();
+                                let cleanup_test = test.clone();
+                                // Make a cleanup task to remove old tests five seconds later
+                                tokio::spawn(async move {
+                                    tokio::time::sleep(Duration::from_secs(5)).await;
+                                    cypher_tests.lock().await.remove(&cleanup_test);
+                                });
                                 let ntc = recv_ntc.clone();
                                 tokio::spawn(async move {
-                                    let key = Key::from_serializable(&key);
+                                    let key = PublicKey::from_serializable(&key);
                                     let ts = ntc.tick().await;
                                     let response = Packet::new(
                                         PacketType::Request,
@@ -127,7 +161,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             PacketData::KeyVerification(data) => {
                                 let test = String::from_utf8(data).unwrap();
-                                if cypher_tests.remove(&test) {
+                                if let Some(key) = cypher_tests.lock().await.remove(&test) {
+                                    recv_keys
+                                        .lock()
+                                        .await
+                                        .insert(msg.source, PublicKey::from_serializable(&key));
+
                                     let ts = recv_ntc.tick().await;
                                     let response = Packet::new(
                                         PacketType::Request,
@@ -140,6 +179,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     tokio::spawn(async move {
                                         let _ = ntc.send_reliable(response, msg.source).await;
                                     });
+                                }
+                            }
+                            PacketData::KeyRequest(ip) => {
+                                if (recv_keys.lock().await).contains_key(&ip) {
+                                    let ts = recv_ntc.tick().await;
+                                    let response = Packet::new(
+                                        PacketType::Request,
+                                        recv_ntc.my_ip,
+                                        msg.source,
+                                        ts,
+                                        PacketData::KeyResponse(
+                                            ip,
+                                            recv_keys
+                                                .lock()
+                                                .await
+                                                .get(&ip)
+                                                .unwrap()
+                                                .to_serializable(),
+                                        ),
+                                    );
+                                    let ntc = recv_ntc.clone();
+                                    tokio::spawn(async move {
+                                        let _ = ntc.send_reliable(response, msg.source).await;
+                                    });
+                                } else {
+                                    println!("No key found for {}", ip);
                                 }
                             }
                             _ => {}

@@ -2,7 +2,8 @@ use crate::client::{Client, ClientMode, Status};
 use client_node::network_core::NetworkCore;
 use client_node::packet::{PACKET_SIZE, Packet, PacketData, PacketType};
 use client_node::utils::addr::IpAddr;
-use client_node::utils::key::Key;
+use client_node::utils::key::{Key, PublicKey};
+use crossterm::event::KeyEventKind;
 use crossterm::{
     event::{self, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode},
@@ -18,7 +19,6 @@ use ratatui::{
 };
 use std::collections::BTreeSet;
 use std::io;
-use std::os::macos::raw::stat;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::{Duration, Instant}; // Re-export for top-level access
@@ -48,8 +48,10 @@ enum UiEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
 enum MessageFlag {
+    Encrypted,
     Normal,
     Error,
+    Info,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,24 +84,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     client.clone().set_mode(ClientMode::Normal).await;
 
-    let known_peers: Arc<Mutex<IndexMap<IpAddr, Instant>>> = Arc::new(Mutex::new(IndexMap::new()));
+    #[derive(Clone, Debug)]
+    enum PeerInfo {
+        LastSeen(Instant),
+        KeyOption(Option<PublicKey>),
+    }
+    let known_peers: Arc<Mutex<IndexMap<IpAddr, PeerInfo>>> = Arc::new(Mutex::new(IndexMap::new()));
+
     // Task 0: Periodic cleanup of known peers
     let cleanup_peers = known_peers.clone();
     let cleanup_client = client.clone();
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_millis(10)).await;
-            if cleanup_client.is_discovering().await {
-                let now = Instant::now();
-                let mut peers = cleanup_peers.lock().await;
-                peers
-                    .retain(|_, last_seen| now.duration_since(*last_seen) < Duration::from_secs(5));
-            } else {
-                if let ClientMode::SSL(_, _, _, timestamp) = cleanup_client.get_mode().await
-                    && timestamp.elapsed() > Duration::from_secs(10)
-                {
-                    cleanup_client.clone().set_mode(ClientMode::Normal).await;
+            // Cleanup known peers that haven't been seen for 5 seconds
+            let now = Instant::now();
+            let mut peers = cleanup_peers.lock().await;
+            peers.retain(|_, info| match info {
+                PeerInfo::LastSeen(last_seen) => {
+                    now.duration_since(*last_seen) < Duration::from_secs(5)
                 }
+                PeerInfo::KeyOption(_) => true,
+            });
+
+            // Reset SSL mode if the server hasn't been seen for 10 seconds
+            if let ClientMode::SSL(_, _, _, timestamp) = cleanup_client.get_mode().await
+                && timestamp.elapsed() > Duration::from_secs(10)
+            {
+                cleanup_client.clone().set_mode(ClientMode::Normal).await;
             }
         }
     });
@@ -128,7 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             // In a block to drop the lock before sending messages
                             let now = Instant::now();
                             let mut peers = known_peers_listener.lock().await;
-                            peers.insert(msg.source, now).is_none()
+                            peers.insert(msg.source, PeerInfo::LastSeen(now)).is_none()
                         };
                         if newly_added {
                             push_message!(
@@ -137,7 +149,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     timestamp: msg.timestamp,
                                     source: msg.source.into(),
                                     content: format!("Discovered peer: {}", msg.source),
-                                    flag: MessageFlag::Normal
+                                    flag: MessageFlag::Info
                                 }
                             );
                         }
@@ -158,6 +170,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         source: msg.source,
                                         content: format!("<{}> {}", msg.source, content),
                                         flag: MessageFlag::Normal
+                                    }
+                                );
+                            }
+                            PacketData::SSLText(content) => {
+                                push_message!(
+                                    tx_listener,
+                                    MessageEntry {
+                                        timestamp: msg.timestamp,
+                                        source: msg.source,
+                                        content: format!(
+                                            "<{}> {}",
+                                            msg.source,
+                                            client_key.decode_message(&content)
+                                        ),
+                                        flag: MessageFlag::Encrypted
                                     }
                                 );
                             }
@@ -207,6 +234,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                             Instant::now(),
                                         ))
                                         .await;
+                                    push_message!(
+                                        tx_listener,
+                                        MessageEntry {
+                                            timestamp: msg.timestamp,
+                                            source: msg.source,
+                                            content: format!(
+                                                "Switched to SSL mode with {}",
+                                                msg.source
+                                            ),
+                                            flag: MessageFlag::Info
+                                        }
+                                    );
+                                }
+                            }
+                            PacketData::KeyResponse(ip, key) => {
+                                if let ClientMode::SSL(_, server_ip, status, _) =
+                                    client_listener.get_mode().await
+                                {
+                                    if server_ip != msg.source {
+                                        continue; // Ignore if the source is not the expected server IP
+                                    }
+                                    if status != Status::Ready {
+                                        // If already in SSL mode, ignore the response
+                                        continue;
+                                    }
+                                    // Store the key for later use
+                                    let mut peers = known_peers_listener.lock().await;
+                                    peers.insert(
+                                        ip,
+                                        PeerInfo::KeyOption(Some(PublicKey::from_serializable(
+                                            &key,
+                                        ))),
+                                    );
+                                    push_message!(
+                                        tx_listener,
+                                        MessageEntry {
+                                            timestamp: msg.timestamp,
+                                            source: msg.source,
+                                            content: format!(
+                                                "Received key from {}: {}",
+                                                msg.source, ip
+                                            ),
+                                            flag: MessageFlag::Info
+                                        }
+                                    );
                                 }
                             }
                             _ => {} // Ignore other packet data types
@@ -215,6 +287,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     PacketType::Acknowledgment => ntc.acknowledge(msg.id).await,
                     PacketType::Broadcast => {}
                     PacketType::DNSDiscovery => {
+                        ntc.observe(msg.timestamp).await;
                         ntc.send_dns_ack(&msg, msg.source).await;
                         if let ClientMode::SSL(client_key, server_ip, status, _) =
                             client_listener.get_mode().await
@@ -248,25 +321,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if client_listener.is_discovering().await {
                             continue; // Ignore DNS updates during discovery
                         }
+                        let _ = ntc.send_ack(&msg, msg.source).await;
                         ntc.observe(msg.timestamp).await;
                         // Update the known peers with DNS discovery content
                         let mut peers = known_peers_listener.lock().await;
                         if let PacketData::Peers(new_peers) = msg.data {
                             // Remove peers that are not in the new list
-                            peers.retain(|ip, _| new_peers.contains(ip)); // ! this line is dangerous as it remove peers that are not known from the auth server but still exist on the network like no ssl node
+                            peers.retain(|ip, info| match info {
+                                PeerInfo::KeyOption(_) => new_peers.contains(ip),
+                                _ => true,
+                            });
                             // Add new peers from the DNS update
                             for peer in new_peers {
-                                if !peers.contains_key(&peer) && peer != ntc.my_ip {
-                                    peers.insert(peer, Instant::now());
-                                    push_message!(
-                                        tx_listener,
-                                        MessageEntry {
-                                            timestamp: msg.timestamp,
-                                            source: peer,
-                                            content: format!("New peer: {}", peer),
-                                            flag: MessageFlag::Normal
-                                        }
-                                    );
+                                if peer != ntc.my_ip {
+                                    if let Some(PeerInfo::KeyOption(Some(_))) = peers.get(&peer) {
+                                        // Skip if the peer already has a key
+                                        continue;
+                                    }
+                                    let newly_added = peers.insert(peer, PeerInfo::KeyOption(None));
+                                    if newly_added.is_none() {
+                                        // If the peer was not already known, notify the UI
+                                        push_message!(
+                                            tx_listener,
+                                            MessageEntry {
+                                                timestamp: msg.timestamp,
+                                                source: peer,
+                                                content: format!("New peer: {}", peer),
+                                                flag: MessageFlag::Info
+                                            }
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -295,6 +379,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Handle input
         if event::poll(std::time::Duration::from_millis(0)).unwrap() {
             if let Event::Key(key_event) = event::read().unwrap() {
+                if key_event.kind != KeyEventKind::Press {
+                    continue;
+                }
                 match key_event.code {
                     KeyCode::Char(c) => {
                         input.push(c);
@@ -315,27 +402,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 Some(
                                     peers
                                         .get_index(target_index as usize)
-                                        .map(|(ip, _)| ip.clone())
+                                        .map(|(ip, info)| (*ip, info.clone()))
                                         .expect("Invalid index"),
                                 )
                             }
                         };
                         let tx = tx.clone();
-                        if let Some(ip) = target {
+                        if let Some((ip, info)) = target {
                             let ts = ntc.tick().await;
-                            let msg = Packet::new(
-                                PacketType::Request,
-                                ntc.my_ip,
-                                ip,
-                                ts,
-                                PacketData::Text(input.clone()),
-                            );
+                            let (data, flag) = match info {
+                                PeerInfo::KeyOption(Some(key)) => (
+                                    PacketData::SSLText(key.encode_message(&input)),
+                                    MessageFlag::Encrypted,
+                                ),
+                                _ => (PacketData::Text(input.clone()), MessageFlag::Normal),
+                            };
+                            let msg = Packet::new(PacketType::Request, ntc.my_ip, ip, ts, data);
                             let target_str = ip.to_string();
                             let entry = MessageEntry {
                                 timestamp: ts,
                                 source: ntc.my_ip,
                                 content: format!("[{}] {}", target_str, input),
-                                flag: MessageFlag::Normal,
+                                flag,
                             };
                             push_message!(tx, entry.clone());
                             let ntc = ntc.clone();
@@ -382,6 +470,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             target_index = -1;
                         } else {
                             target_index = ((target_index + 2) % ((peers.len() + 1) as isize)) - 1;
+
+                            // If in ssl mode, try to get the public key
+                            if let ClientMode::SSL(_, server_ip, status, _) =
+                                client.get_mode().await
+                            {
+                                if status == Status::Ready && target_index >= 0 {
+                                    if let Some((ip, info)) = peers.get_index(target_index as usize)
+                                    {
+                                        if let PeerInfo::KeyOption(None) = info {
+                                            // If the key is not known, request it
+                                            let ts = ntc.tick().await;
+                                            let msg = Packet::new(
+                                                PacketType::Request,
+                                                ntc.my_ip,
+                                                server_ip,
+                                                ts,
+                                                PacketData::KeyRequest(ip.clone()),
+                                            );
+                                            let ntc = ntc.clone();
+                                            tokio::spawn(async move {
+                                                let _ = ntc.send_reliable(msg, server_ip).await;
+                                            });
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     KeyCode::Esc => {
@@ -485,12 +599,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let message_lines: Vec<Line> = messages
                 .iter()
                 .cloned()
-                .map(|msg| {
-                    let style = match msg.flag {
-                        MessageFlag::Error => Style::default().fg(Color::Red),
-                        MessageFlag::Normal => Style::default(),
-                    };
-                    Line::from(Span::styled(msg.content, style))
+                .map(|msg| match msg.flag {
+                    MessageFlag::Error => {
+                        Line::from(Span::styled(msg.content, Style::default().fg(Color::Red)))
+                    }
+                    MessageFlag::Normal => Line::from(Span::styled(msg.content, Style::default())),
+                    MessageFlag::Encrypted => {
+                        let mut parts = msg.content.split(" ");
+                        let prefix = parts.next().unwrap_or("[error]").to_string();
+                        let msg = parts.collect::<Vec<_>>().join(" ");
+                        Line::from(vec![
+                            Span::styled(prefix + " ", Style::default().fg(Color::Green)),
+                            Span::styled(msg, Style::default()),
+                        ])
+                    }
+                    MessageFlag::Info => Line::from(vec![
+                        Span::styled("<INFO> ", Style::default().fg(Color::Blue)),
+                        Span::styled(msg.content, Style::default()),
+                    ]),
                 })
                 .collect();
 
